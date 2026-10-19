@@ -1,0 +1,29 @@
+singleton Style 1.0 Style.qml
+singleton UsageStore 1.0 UsageStore.qml
+singleton I18n 1.0 I18n.qml
+singleton Lunar 1.0 Lunar.qml
+singleton Almanac 1.0 Almanac.qml
+singleton WallpaperMap 1.0 WallpaperMap.qml
+Wallpaper 1.0 Wallpaper.qml
+BarButton 1.0 BarButton.qml
+FileIcon 1.0 FileIcon.qml
+Module 1.0 Module.qml
+OverlayPanel 1.0 OverlayPanel.qml
+Poller 1.0 Poller.qml
+SafeMouseArea 1.0 SafeMouseArea.qml
+StepCtl 1.0 StepCtl.qml
+NotificationCenter 1.0 NotificationCenter.qml
+Weather 1.0 Weather.qml
+RebootNeeded 1.0 RebootNeeded.qml
+NotificationCenterPanel 1.0 NotificationCenterPanel.qml
+NotifyButton 1.0 NotifyButton.qml
+NotificationPopup 1.0 NotificationPopup.qml
+VolumeSlider 1.0 VolumeSlider.qml
+WindowIcon 1.0 WindowIcon.qml
+WorkspaceButton 1.0 WorkspaceButton.qml
+AppLauncher 1.0 AppLauncher.qml
+PowerMenu 1.0 PowerMenu.qml
+LockScreen 1.0 LockScreen.qml
+ClipPicker 1.0 ClipPicker.qml
+SettingsPanel 1.0 SettingsPanel.qml
+PolkitPrompt 1.0 PolkitPrompt.qml
