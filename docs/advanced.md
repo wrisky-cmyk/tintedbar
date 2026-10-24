@@ -105,7 +105,7 @@ components/                  Style（配色/字体） · Compositor（组合器�
                              键盘布局等，§ 见仓库文档） · I18n（文案/日期） · Lunar（农历）
                              Almanac（干支/月相/节气） · Weather · IconProbe（图标探测）
                              启动器/剪贴板/电源/通知/设置面板 · LockScreen
-                             栏上模块与时钟/天气/亮度弹窗（2026-10-24 起从 shell.qml
+                             栏上模块与时钟/天气/亮度弹窗（V26.10.24 起从 shell.qml
                              拆出为独立文件） · 各组按钮
 scripts/                     icon-follow.sh · launch-desktop.sh · theme-apply.sh
                              theme-toggle.sh · theme-css.sh（把主题 CSS 解析成“名字=值”）
