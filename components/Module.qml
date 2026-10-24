@@ -15,14 +15,14 @@ Item {
 
     property bool shown: true
 
-    property real contentWidth: 0
+    property real contentWidth: -1
 
     signal clicked
     signal rightClicked
 
     implicitHeight: Style.barContentHeight
     visible: mod.shown
-    implicitWidth: (mod.contentWidth > 0 ? mod.contentWidth : contentItem.childrenRect.width) + mod.padLeft + mod.padRight + mod.marginLeft + mod.marginRight
+    implicitWidth: (mod.contentWidth >= 0 ? mod.contentWidth : contentItem.childrenRect.width) + mod.padLeft + mod.padRight + mod.marginLeft + mod.marginRight
 
     default property alias content: contentItem.data
 
@@ -61,5 +61,20 @@ Item {
             else
                 mod.clicked();
         }
+
+        onWheel: ev => {
+            if (!mod.wheelEnabled || ev.angleDelta.y === 0)
+                return;
+            mod.wheelAccum += ev.angleDelta.y;
+            while (Math.abs(mod.wheelAccum) >= 120) {
+                const dir = mod.wheelAccum > 0 ? 1 : -1;
+                mod.wheelAccum -= dir * 120;
+                mod.wheelNotch(dir);
+            }
+        }
     }
+
+    property bool wheelEnabled: false
+    property real wheelAccum: 0
+    signal wheelNotch(int d)
 }

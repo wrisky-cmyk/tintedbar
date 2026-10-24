@@ -15,7 +15,7 @@ Item {
     property bool dnd: false
 
     property bool fullscreenDnd: true
-    readonly property bool popupSuppressed: center.fullscreenDnd && Style.fullscreenActive
+    readonly property bool popupSuppressed: center.fullscreenDnd && Compositor.fullscreenActive
 
     property bool panelOpen: false
 
@@ -26,6 +26,8 @@ Item {
     property var history: []
 
     property bool historyLoaded: false
+
+    property bool historySettled: false
 
     readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Style.home + "/.local/state")) + "/quickshell"
 
@@ -69,6 +71,9 @@ Item {
                 } catch (e) {
                     list = [];
                 }
+
+                if (!Array.isArray(list))
+                    list = [];
 
                 const out = [];
                 for (const e of list) {
@@ -137,7 +142,8 @@ Item {
     function pushEntry(entry) {
         const list = center.history.slice();
         list.unshift(entry);
-        if (list.length > center.historyLimit)
+
+        if (center.historySettled && list.length > center.historyLimit)
             list.length = center.historyLimit;
         center.history = list;
     }
@@ -169,7 +175,7 @@ Item {
                 n.dismiss();
             } catch (e) {
                 if (Style.debug)
-                    console.log("[NOTIFY] trim dismiss 异常:", e);
+                    console.log("[NOTIFY] trim dismiss exception:", e);
             }
         }
     }
@@ -230,13 +236,13 @@ Item {
                     }
                 } catch (e) {
                     if (Style.debug)
-                        console.log("[ACTIVATE] actions 异常:", e);
+                        console.log("[ACTIVATE] actions exception:", e);
                 }
                 break;
             }
         }
         if (!handled)
-            handled = Style.focusAppWindow([entry.desktopEntry, entry.appIcon, entry.appName]);
+            handled = Compositor.focusAppWindow([entry.desktopEntry, entry.appIcon, entry.appName]);
         if (!handled && entry.desktopEntry && entry.desktopEntry !== "") {
             Style.launchDesktop(entry.desktopEntry);
             handled = true;
@@ -279,7 +285,7 @@ Item {
                 return;
             }
             if (Style.debug) {
-                console.log("[NOTIFY] t=" + Date.now() + " 收到:", n.appName, "/", n.summary, "urgency=" + n.urgency, "timeout=" + n.expireTimeout);
+                console.log("[NOTIFY] t=" + Date.now() + " received:", n.appName, "/", n.summary, "urgency=" + n.urgency, "timeout=" + n.expireTimeout);
             }
             center.onArrive(n);
             center.armTest(n);

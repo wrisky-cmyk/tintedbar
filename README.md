@@ -34,7 +34,7 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 | Hyprland 或 niri（`hyprctl` / `niri msg`） | 工作区、标题、焦点、DPMS |
 | D-Bus 会话总线 + NetworkManager / UPower / BlueZ / PipeWire / 通知服务 | 网络、电池、蓝牙、音量、通知；缺失时对应模块留空，不会崩溃 |
 | `sh` + coreutils（`grep`/`sed`/`find`/`df`） | 读取 `/proc`、`/sys`，调用命令行工具 |
-| 字体 **JetBrainsMono Nerd Font** + **Noto Sans CJK SC** | 图标字形与中文；缺失时回退系统字体，并输出 `[FONT]` WARN（常见豆腐块） |
+| 字体 **JetBrainsMono Nerd Font（v3+）** + **Noto Sans CJK SC** | 图标字形与中文；缺失时回退系统字体，并输出 `[FONT]` WARN（常见豆腐块）。**需 v3 及以上**：亮度/天气/蓝牙关等图标用的是 v3 重映射后的码位，v2 上会错位或豆腐（检测只认字体名，不报错） |
 
 **按模块可选**（缺失只影响对应功能）：
 
@@ -42,6 +42,7 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 | --- | --- |
 | `cliphist` + wl-clipboard | 剪贴板面板。**写入端需自行加入合成器 autostart**：`wl-paste --watch cliphist store` |
 | `curl` | 天气（仅在开关打开时每 30 分钟请求一次 Open-Meteo） |
+| `ddcutil` | 外接屏亮度（DDC/CI，用户需在 i2c 组）；内置屏背光走 logind，不需要任何包 |
 | `gsettings` / `gio`（或 `xdg-open`） | 跟随系统深浅色 / 启动器打开应用 |
 | `notify-send`（libnotify） | 重启提示的通知动作；缺失时图标仍可点，但不会弹出详情 |
 | `systemctl` / `loginctl` | 电源菜单的关机/重启/休眠/注销 |
@@ -89,6 +90,7 @@ qs ipc call wallpaper reload          # 重读壁纸映射
 qs ipc call bt toggle                 # 切换蓝牙电源
 qs ipc call audio mute                # 切换默认输出静音
 qs ipc call net toggle                # 断开/接回当前链路（有线优先）
+qs ipc call brightness set <0-100>    # 亮度（也支持 step <±N>）
 ```
 
 多屏时，面板作用于**聚焦屏**；lock / wallpaper / bt 为全局。
@@ -103,6 +105,8 @@ qs ipc call net toggle                # 断开/接回当前链路（有线优先
 | 网络 | 打开 nm-applet | 无线格开关射频；有线格断开或接回网线；网速数字断开当前链路 |
 | 蓝牙 | 打开 blueman-manager | 切换蓝牙电源 |
 | 音量 | 打开 pavucontrol | 切换默认输出静音 |
+| 麦克风（占用时显示） | 弹出输入音量滑条 | 切换麦克风静音（图标变带斜杠并压暗） |
+| 亮度 | 弹出亮度滑条 | — |
 | 深浅 / 温度等 | 切换系统深浅色 / 在终端打开 `top` | — |
 | 空闲抑制 | 切换“现在是否抑制” | 立即上锁 |
 | 齿轮 / 重启提示 | 设置面板 / 查看重启原因 | — / 立即重新检查 |

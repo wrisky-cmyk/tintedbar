@@ -5,6 +5,9 @@ import "."
 OverlayPanel {
     id: settings
 
+    required property var qsRoot
+    required property var notifCenter
+
     function flagsIn(group) {
         const out = [];
         for (const f of (qsRoot.barFlagList || []))
@@ -17,6 +20,8 @@ OverlayPanel {
     readonly property var moduleFlags: flagsIn("module")
 
     readonly property var idleFlags: flagsIn("idle")
+
+    readonly property string repoUrl: "https://github.com/wrisky-cmyk/tintedbar"
 
     function open() {
         visible = true;
@@ -482,7 +487,12 @@ OverlayPanel {
 
                 ChoiceRow {
                     labelText: I18n.t("panel.version")
-                    activate: () => settings.close()
+                    function adjust(d) {
+                    }
+                    activate: () => {
+                        Quickshell.execDetached(["xdg-open", settings.repoUrl]);
+                        settings.close();
+                    }
 
                     valueText: Style.version + (Style.packedCopy ? "+" + Style.packedFingerprint : "") + (Style.modified ? "≠" : "")
                     valueColor: Style.modified ? Style.danger : Style.text1

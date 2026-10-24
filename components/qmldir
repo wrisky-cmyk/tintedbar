@@ -1,9 +1,11 @@
 singleton Style 1.0 Style.qml
+singleton Compositor 1.0 Compositor.qml
 singleton UsageStore 1.0 UsageStore.qml
 singleton I18n 1.0 I18n.qml
 singleton Lunar 1.0 Lunar.qml
 singleton Almanac 1.0 Almanac.qml
 singleton WallpaperMap 1.0 WallpaperMap.qml
+singleton IconProbe 1.0 IconProbe.qml
 Wallpaper 1.0 Wallpaper.qml
 BarButton 1.0 BarButton.qml
 FileIcon 1.0 FileIcon.qml
@@ -27,3 +29,17 @@ LockScreen 1.0 LockScreen.qml
 ClipPicker 1.0 ClipPicker.qml
 SettingsPanel 1.0 SettingsPanel.qml
 PolkitPrompt 1.0 PolkitPrompt.qml
+CalendarPopup 1.0 CalendarPopup.qml
+WeatherPopup 1.0 WeatherPopup.qml
+BrightnessPopup 1.0 BrightnessPopup.qml
+KeyboardModule 1.0 KeyboardModule.qml
+BatteryModule 1.0 BatteryModule.qml
+BrightnessModule 1.0 BrightnessModule.qml
+WifiModule 1.0 WifiModule.qml
+WiredModule 1.0 WiredModule.qml
+NoNetModule 1.0 NoNetModule.qml
+NetSpeedModule 1.0 NetSpeedModule.qml
+ClockModule 1.0 ClockModule.qml
+TrayModule 1.0 TrayModule.qml
+PrivacyModule 1.0 PrivacyModule.qml
+MprisModule 1.0 MprisModule.qml

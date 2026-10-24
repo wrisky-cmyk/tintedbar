@@ -33,6 +33,8 @@ Item {
                 } catch (e) {
                     loaded = {};
                 }
+                if (!loaded || typeof loaded !== "object" || Array.isArray(loaded))
+                    loaded = {};
                 const merged = Object.assign({}, loaded);
                 for (const k in store.usage)
                     merged[k] = Math.max(merged[k] || 0, store.usage[k] || 0);

@@ -45,12 +45,12 @@ OverlayPanel {
         const f = prompt.flow;
         if (!f || prompt.submitted || field.text === "") {
             if (Style.debug)
-                console.log("[POLKIT] submit() 被挡: len=" + field.text.length + " submitted=" + prompt.submitted + " hasFlow=" + (f !== null));
+                console.log("[POLKIT] submit() blocked: len=" + field.text.length + " submitted=" + prompt.submitted + " hasFlow=" + (f !== null));
             return;
         }
         const v = field.text;
         field.text = "";
-        console.log("[POLKIT] submit() 已提交");
+        console.log("[POLKIT] submit() submitted");
         f.submit(v);
     }
 
@@ -76,7 +76,7 @@ OverlayPanel {
         }
 
         function onAuthenticationFailed() {
-            console.log("[POLKIT] 这轮没通过(pam 已重开一轮, 可以再试)");
+            console.log("[POLKIT] this round failed (pam reopened a round, can retry)");
         }
 
         function onIsCompletedChanged() {
@@ -84,7 +84,7 @@ OverlayPanel {
             if (!f || !f.isCompleted)
                 return;
 
-            console.log("[POLKIT] 请求结束: " + (f.isCancelled ? "已取消" : "认证通过"));
+            console.log("[POLKIT] request finished: " + (f.isCancelled ? "cancelled" : "authorized"));
         }
     }
 

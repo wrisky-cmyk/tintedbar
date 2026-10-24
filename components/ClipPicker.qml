@@ -31,7 +31,9 @@ OverlayPanel {
         query = "";
         input.text = "";
         picker.headerSel = 0;
-        clipsLoad.running = true;
+
+        if (!clipsLoad.running)
+            clipsLoad.running = true;
         input.forceActiveFocus();
     }
     function close() {
@@ -92,6 +94,9 @@ OverlayPanel {
 
     function pick(line) {
         if (!line)
+            return;
+
+        if (copyProc.running)
             return;
         close();
 

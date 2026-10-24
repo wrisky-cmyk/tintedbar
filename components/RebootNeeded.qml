@@ -113,7 +113,7 @@ Item {
         rb.newerModules = newer(mod);
         rb.staleLibs = lib;
 
-        rb.reason = (boot > 0 ? "" : "没读到 /proc/stat 的 btime(容器或无权限?), ①②③ 都不成立; ") + "① 内核镜像 " + (seenK === 0 ? "没扫到(/boot 不可读?)" : seenK + " 个") + "; ② 第三方模块 " + (seenM === 0 ? "没扫到(没有 dkms 模块?)" : seenM + " 个") + "; ③ " + (pid === "" ? "认不出合成器(既不是 Hyprland 也不是 niri?), 没查" : "查了 pid " + pid + " 的 maps, 被删的 /usr 文件 " + lib.length + " 个");
+        rb.reason = (boot > 0 ? "" : "couldn't read btime from /proc/stat (container or no perm?), none of ①②③ hold; ") + "① kernel images " + (seenK === 0 ? "none scanned (/boot unreadable?)" : seenK + " found") + "; ② third-party modules " + (seenM === 0 ? "none scanned (no dkms modules?)" : seenM + " found") + "; ③ " + (pid === "" ? "can't identify compositor (neither Hyprland nor niri?), skipped" : "checked maps of pid " + pid + ", deleted /usr files " + lib.length + " found");
     }
 
     Poller {

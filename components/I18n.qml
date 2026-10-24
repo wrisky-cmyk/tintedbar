@@ -49,7 +49,11 @@ QtObject {
                 "flag.showKeyboard": "Num/Caps",
                 "flag.showLanguage": "键盘布局",
                 "flag.showReboot": "重启提示",
+                "flag.showBrightness": "亮度调节",
+                "flag.clock24": "24 小时制",
                 "flag.fullscreenDnd": "全屏免打扰",
+                "time.12h.am": "上午%s",
+                "time.12h.pm": "下午%s",
                 "palette.auto": "跟随系统主题",
                 "palette.tinted": "Tinted",
                 "palette.cyan": "Tinted-Cyan",
@@ -70,6 +74,7 @@ QtObject {
                 "notif.title": "通知",
                 "notif.clearAll": "全部删除",
                 "notif.empty": "暂无通知",
+                "notif.ignore": "忽略",
                 "power.lock": "锁定",
                 "power.logout": "注销",
                 "power.suspend": "睡眠",
@@ -124,7 +129,8 @@ QtObject {
                 "polkit.cancel": "取消",
                 "polkit.failed": "密码错误",
                 "polkit.hint": "Enter 验证 · Esc 取消",
-                "polkit.capsOn": "Caps Lock 已开"
+                "polkit.capsOn": "Caps Lock 已开",
+                "mic.muted": "静音"
             },
             date: {
                 weekdays: ["日", "一", "二", "三", "四", "五", "六"],
@@ -213,7 +219,12 @@ QtObject {
                 "flag.showKeyboard": "Num/Caps",
                 "flag.showLanguage": "Keyboard layout",
                 "flag.showReboot": "Reboot hint",
+                "flag.showBrightness": "Brightness",
+                "flag.clock24": "24-hour clock",
                 "flag.fullscreenDnd": "Fullscreen DND",
+                "mic.muted": "Muted",
+                "time.12h.am": "%s AM",
+                "time.12h.pm": "%s PM",
                 "palette.auto": "Auto (follow theme)",
                 "palette.tinted": "Tinted",
                 "palette.cyan": "Tinted-Cyan",
@@ -234,6 +245,7 @@ QtObject {
                 "notif.title": "Notifications",
                 "notif.clearAll": "Clear all",
                 "notif.empty": "No notifications",
+                "notif.ignore": "Ignore",
                 "power.lock": "Lock",
                 "power.logout": "Log out",
                 "power.suspend": "Suspend",
@@ -372,10 +384,9 @@ QtObject {
 
     readonly property var weekdayHeaders: i18n.langEntry.date.calHeaders
 
-    function dateParts(seconds) {
+    function dateParts(seconds, clock24) {
         const d = new Date();
         const dt = i18n.langEntry.date;
-        const withSec = seconds === undefined || seconds;
         return {
             wd: i18n.fill(dt.wdTemplate, {
                 WD: dt.weekdays[d.getDay()]
@@ -386,16 +397,16 @@ QtObject {
                 MON: dt.monthsShort ? dt.monthsShort[d.getMonth()] : "",
                 MONTH: dt.monthsLong ? dt.monthsLong[d.getMonth()] : ""
             }),
-            time: i18n.pad(d.getHours()) + ":" + i18n.pad(d.getMinutes()) + (withSec ? ":" + i18n.pad(d.getSeconds()) : "")
+            time: Style.timeStr(seconds, clock24)
         };
     }
 
-    function dateSampleParts(seconds) {
+    function dateSampleParts(seconds, clock24) {
         const withSec = seconds === undefined || seconds;
         return {
             wd: i18n.langEntry.date.wdSample,
             day: i18n.langEntry.date.daySample,
-            time: withSec ? "23:59:59" : "23:59"
+            time: clock24 === false ? i18n.t("time.12h.am").replace("%s", withSec ? "12:59:59" : "12:59") : (withSec ? "23:59:59" : "23:59")
         };
     }
 

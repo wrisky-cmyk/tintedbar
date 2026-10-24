@@ -45,7 +45,11 @@ done
 base=$(basename "$f" .desktop)
 
 case "${id%.desktop}" in
-    yazi) exec ghostty --class=yazi -e yazi ;;
+    yazi)
+
+        command -v ghostty >/dev/null 2>&1 \
+            || { echo "launch-desktop: ghostty not found, cannot start yazi" >&2; exit 127; }
+        exec ghostty --class=yazi -e yazi ;;
 esac
 
 if grep -qs '^Terminal=true' "$f"; then
@@ -54,6 +58,9 @@ if grep -qs '^Terminal=true' "$f"; then
     exec_line=$(printf '%s' "$exec_line" | sed 's/ %[fFuUdDnNickvm]//g; s/%[fFuUdDnNickvm]//g')
     [ -n "$exec_line" ] || exit 0
     term="${TERMINAL:-alacritty}"
+
+    command -v -- "$term" >/dev/null 2>&1 \
+        || { echo "launch-desktop: terminal '$term' not found (TERMINAL or default alacritty), cannot start $base" >&2; exit 127; }
 
     set -f
     case "$term" in

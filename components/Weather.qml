@@ -52,25 +52,42 @@ Item {
             obj = null;
         }
 
-        if (!obj || !obj.current || !obj.daily) {
+        if (!obj || !obj.current || !obj.daily || !wx.applyPayload(obj)) {
             if (wx.ok)
                 wx.stale = true;
             return;
         }
-        wx.applyPayload(obj);
         wx.stale = false;
         wx.cacheSave(obj);
     }
 
+    function num(v) {
+        if (v === null || v === undefined)
+            return NaN;
+        if (typeof v === "string" && v.trim() === "")
+            return NaN;
+        const n = Number(v);
+        return isFinite(n) ? n : NaN;
+    }
+
     function applyPayload(p) {
         const cur = p.current || {};
-        wx.current = {
-            temp: Number(cur.temperature_2m),
-            feels: Number(cur.apparent_temperature),
-            humidity: Number(cur.relative_humidity_2m),
-            wind: Number(cur.wind_speed_10m),
-            code: Number(cur.weather_code),
-            isDay: Number(cur.is_day) === 1
+        const temp = wx.num(cur.temperature_2m);
+        const feels = wx.num(cur.apparent_temperature);
+        const humidity = wx.num(cur.relative_humidity_2m);
+        const wind = wx.num(cur.wind_speed_10m);
+        const code = wx.num(cur.weather_code);
+        const isDay = wx.num(cur.is_day);
+        if (!isFinite(temp) || !isFinite(feels) || !isFinite(humidity) || !isFinite(wind) || !isFinite(code) || !isFinite(isDay))
+            return false;
+
+        const curOut = {
+            temp: temp,
+            feels: feels,
+            humidity: humidity,
+            wind: wind,
+            code: code,
+            isDay: isDay === 1
         };
         const d = p.daily || {};
         const time = d.time || [];
@@ -79,14 +96,22 @@ Item {
         const mins = d.temperature_2m_min || [];
         const out = [];
         for (let i = 0; i < time.length; i++) {
+            const dc = wx.num(codes[i]);
+            const dmax = wx.num(maxs[i]);
+            const dmin = wx.num(mins[i]);
+            const date = (time[i] === null || time[i] === undefined) ? "" : String(time[i]);
+            if (date === "" || !isFinite(dc) || !isFinite(dmax) || !isFinite(dmin))
+                return false;
             out.push({
-                date: String(time[i]),
-                code: Number(codes[i]),
-                max: Number(maxs[i]),
-                min: Number(mins[i])
+                date: date,
+                code: dc,
+                max: dmax,
+                min: dmin
             });
         }
+        wx.current = curOut;
         wx.daily = out;
+        return true;
     }
 
     function cacheSave(payload) {
@@ -108,6 +133,8 @@ Item {
         command: ["sh", "-c", Style.readJsonCmd(wx.cachePath, "{}")]
         stdout: StdioCollector {
             onStreamFinished: {
+                if (wx.ok && !wx.stale)
+                    return;
                 let saved = {};
                 try {
                     saved = JSON.parse(text);
@@ -116,7 +143,8 @@ Item {
                 }
                 if (!saved || !saved.data || !saved.data.current)
                     return;
-                wx.applyPayload(saved.data);
+                if (!wx.applyPayload(saved.data))
+                    return;
                 if (saved.at && (Date.now() - saved.at) > wx.staleAfterMs)
                     wx.stale = true;
             }

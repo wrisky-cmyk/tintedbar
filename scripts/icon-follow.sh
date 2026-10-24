@@ -2,12 +2,12 @@
 
 set -uo pipefail
 mode=${1:-}
-case "$mode" in dark|light) ;; *) echo "用法: $0 dark|light" >&2; exit 1 ;; esac
+case "$mode" in dark|light) ;; *) echo "usage: $0 dark|light" >&2; exit 1 ;; esac
 
 key=org.gnome.desktop.interface
 
 if ! cur=$(gsettings get $key icon-theme 2>/dev/null); then
-  echo "icon-follow: 读 icon-theme 失败, 跳过" >&2
+  echo "icon-follow: failed to read icon-theme, skipping" >&2
   exit 0
 fi
 cur=${cur#\'}; cur=${cur%\'}
@@ -41,7 +41,7 @@ done
 [ "$target" = "$cur" ] && exit 0
 
 if ! gsettings set $key icon-theme "$target" 2>/dev/null; then
-  echo "icon-follow: gsettings set icon-theme=$target 失败" >&2
+  echo "icon-follow: gsettings set icon-theme=$target failed" >&2
   exit 1
 fi
 

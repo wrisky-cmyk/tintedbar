@@ -4,6 +4,8 @@ import Quickshell.Services.Pipewire
 Item {
     id: volSlider
 
+    required property var qsRoot
+
     readonly property var sink: Pipewire.defaultAudioSink
 
     readonly property var audio: (volSlider.sink && volSlider.sink.audio) ? volSlider.sink.audio : null
@@ -99,7 +101,7 @@ Item {
 
         onClicked: m => {
             if (m.button === Qt.RightButton)
-                qsRoot.audioToggleMute("右键(滑条)");
+                qsRoot.audioToggleMute("right-click(slider)");
         }
     }
 

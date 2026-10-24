@@ -79,6 +79,8 @@ OverlayPanel {
     function copyCalc() {
         if (calc === null)
             return;
+        if (calcCopy.running)
+            return;
         calcCopy.command = ["bash", "-c", "printf '%s' " + Style.sq(fmtCalc(calc)) + " | wl-copy"];
         calcCopy.running = true;
         launcher.close();

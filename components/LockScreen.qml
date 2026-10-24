@@ -135,14 +135,14 @@ Item {
         if (lockScreen.dpmsOffByUs)
             return;
         lockScreen.dpmsOffByUs = true;
-        console.log("[DPMS] 空闲 " + lockScreen.idleDpmsMinutes + " 分钟, 熄屏(" + Style.compositor + ", locked=" + lockScreen.locked + ")");
-        Style.setDpms(false);
+        console.log("[DPMS] idle " + lockScreen.idleDpmsMinutes + " min, dpms off(" + Style.compositor + ", locked=" + lockScreen.locked + ")");
+        Compositor.setDpms(false);
     }
 
     function screenOn() {
-        console.log("[DPMS] 有活动, 点亮(" + Style.compositor + ", 之前=" + (lockScreen.dpmsOffByUs ? "我们关的" : "不是我们关的") + ")");
+        console.log("[DPMS] activity, dpms on(" + Style.compositor + ", prev=" + (lockScreen.dpmsOffByUs ? "off by us" : "not by us") + ")");
         lockScreen.dpmsOffByUs = false;
-        Style.setDpms(true);
+        Compositor.setDpms(true);
     }
 
     component IdleWatcher: Loader {
@@ -176,7 +176,7 @@ Item {
     IdleWatcher {
         minutes: lockScreen.locked ? 0 : lockScreen.idleLockMinutes
         onIdle: () => {
-            console.log("[LOCK] 空闲 " + lockScreen.idleLockMinutes + " 分钟, 自动上锁");
+            console.log("[LOCK] idle " + lockScreen.idleLockMinutes + " min, auto lock");
             lockScreen.lockNow();
         }
     }
@@ -253,7 +253,7 @@ Item {
             if (lockScreen.pamReady || lockScreen.busy)
                 return;
             if (lockScreen.activePamConfig !== "login") {
-                console.log("[LOCK] pam(" + lockScreen.activePamConfig + ") 未进入等待输入状态, 退回 login");
+                console.log("[LOCK] pam(" + lockScreen.activePamConfig + ") not in waiting-for-input state, fall back to login");
                 lockScreen.activePamConfig = "login";
                 lockScreen.startPam();
                 return;
@@ -271,14 +271,14 @@ Item {
             if (!lockScreen.locked || lock.secure)
                 return;
             if (lockScreen.surfaceSeen) {
-                console.log("[LOCK] secure=false 但已有锁面, 保持锁定");
+                console.log("[LOCK] secure=false but lock surface exists, staying locked");
                 return;
             }
             if (++lockScreen.secureMisses < 3) {
                 restart();
                 return;
             }
-            console.log("[LOCK] 合成器不支持 ext-session-lock(15s 无任何锁面), 放弃本次锁定");
+            console.log("[LOCK] compositor lacks ext-session-lock (no lock surface in 15s), abandoning this lock");
             lockScreen.unlockNow();
         }
     }
@@ -317,13 +317,16 @@ Item {
             lockScreen.pamReady = false;
 
             if (error === PamError.StartFailed && lockScreen.activePamConfig !== "login") {
-                console.log("[LOCK] pam 配置 " + lockScreen.activePamConfig + " 不可用, 退回 login");
+                console.log("[LOCK] pam config " + lockScreen.activePamConfig + " unavailable, fall back to login");
                 lockScreen.activePamConfig = "login";
                 lockScreen.startPam();
                 return;
             }
             lockScreen.failText = PamError.toString(error);
             lockScreen.authFailed();
+
+            if (error === PamError.StartFailed)
+                return;
             lockScreen.startPam();
         }
     }
@@ -345,7 +348,8 @@ Item {
 
                 source: {
                     const p = lockScreen.wallpaper !== "" ? lockScreen.wallpaper : WallpaperMap.pathFor(surf.screen ? surf.screen.name : "");
-                    return p !== "" ? "file://" + p : "";
+
+                    return WallpaperMap.fileUrl(p);
                 }
 
                 sourceSize.width: {

@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell.Hyprland
 
 Item {
     id: wsBtn
@@ -8,11 +7,11 @@ Item {
 
     property string outputName: ""
 
-    readonly property bool niri: Style.compositor === "niri"
+    readonly property bool niri: Compositor.name === "niri"
 
     property var ws: null
 
-    readonly property bool focused: wsBtn.niri ? Style.workspaceFocused(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? wsBtn.ws.focused : false)
+    readonly property bool focused: wsBtn.niri ? Compositor.workspaceFocused(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? wsBtn.ws.focused : false)
     readonly property bool hasWindows: iconModel.count > 0
 
     readonly property real contentOpacity: focused ? 1.0 : (hasWindows ? 0.9 : 0.3)
@@ -23,15 +22,15 @@ Item {
 
     function refresh() {
         if (!wsBtn.niri)
-            wsBtn.ws = Style.workspaceForId(wsBtn.wsId);
+            wsBtn.ws = Compositor.workspaceForId(wsBtn.wsId);
         wsBtn.syncWindows();
         if (Style.debug && !wsBtn.niri && wsBtn.ws) {
-            console.log("[WSBTN]", wsBtn.wsId, "found, toplevels=" + Style.modelValues(wsBtn.ws.toplevels).length);
+            console.log("[WSBTN]", wsBtn.wsId, "found, toplevels=" + Compositor.modelValues(wsBtn.ws.toplevels).length);
         }
     }
 
     function syncWindows() {
-        const current = wsBtn.niri ? Style.windowsForWorkspace(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? Style.modelValues(wsBtn.ws.toplevels) : []);
+        const current = wsBtn.niri ? Compositor.windowsForWorkspace(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? Compositor.modelValues(wsBtn.ws.toplevels) : []);
         const same = (a, b) => wsBtn.niri ? (a && b && a.__wid === b.__wid) : a === b;
         for (let i = iconModel.count - 1; i >= 0; i--) {
             const t = iconModel.get(i).toplevel;
@@ -133,19 +132,13 @@ Item {
         cursorShape: Qt.PointingHandCursor
         onClicked: {
             if (wsBtn.niri) {
-                Style.activateWorkspace(wsBtn.wsId, wsBtn.outputName);
+                Compositor.activateWorkspace(wsBtn.wsId, wsBtn.outputName);
                 return;
             }
             if (wsBtn.ws) {
                 wsBtn.ws.activate();
-            } else if (Hyprland.usingLua) {
-                if (Style.debug)
-                    console.log("[WSBTN]", wsBtn.wsId, "no ws object, lua dispatch");
-                Hyprland.dispatch('hl.dsp.focus({ workspace = "' + wsBtn.wsId + '" })');
             } else {
-                if (Style.debug)
-                    console.log("[WSBTN]", wsBtn.wsId, "no ws object, classic dispatch");
-                Hyprland.dispatch("workspace " + wsBtn.wsId);
+                Compositor.dispatchWorkspace(wsBtn.wsId);
             }
         }
     }
@@ -189,14 +182,14 @@ Item {
     }
 
     Connections {
-        target: wsBtn.niri ? Style : null
+        target: wsBtn.niri ? Compositor : null
         function onCompositorUpdated() {
             wsBtn.scheduleRefresh();
         }
     }
 
     Connections {
-        target: wsBtn.niri ? null : Hyprland
+        target: wsBtn.niri ? null : Compositor
         function onRawEvent(event) {
             const name = (event && event.name !== undefined) ? String(event.name) : "";
             if (!wsBtn.refreshEvents[name])
@@ -206,14 +199,14 @@ Item {
     }
 
     Connections {
-        target: wsBtn.niri ? null : Hyprland
+        target: wsBtn.niri ? null : Compositor
         function onFocusedWorkspaceChanged() {
             wsBtn.scheduleRefresh();
         }
     }
 
     Connections {
-        target: wsBtn.niri ? null : Hyprland.workspaces
+        target: wsBtn.niri ? null : Compositor
         function onValuesChanged() {
             wsBtn.scheduleRefresh();
         }

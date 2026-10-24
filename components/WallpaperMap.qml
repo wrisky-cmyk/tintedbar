@@ -8,7 +8,7 @@ import "."
 Item {
     id: wm
 
-    property var entries: ({})
+    property var entries: Object.create(null)
 
     readonly property string home: Quickshell.env("HOME") || ""
 
@@ -36,7 +36,7 @@ Item {
         const out = [];
         for (const k of Object.keys(wm.entries).sort()) {
             const e = wm.entries[k];
-            out.push(k + "=" + (e.path !== "" ? e.path : (e.color !== "" ? e.color + "(纯色)" : "(空)")));
+            out.push(k + "=" + (e.path !== "" ? e.path : (e.color !== "" ? e.color + "(solid)" : "(none)")));
         }
         return out.join("  ");
     }
@@ -48,7 +48,7 @@ Item {
 
     function absorb(text) {
         wm.entries = wm.parseConf(text);
-        console.log("[WALLPAPER] 映射: " + wm.summary());
+        console.log("[WALLPAPER] map: " + wm.summary());
     }
 
     function reload() {
@@ -63,7 +63,7 @@ Item {
     }
 
     function parseConf(text) {
-        const out = {};
+        const out = Object.create(null);
         for (const raw of String(text === undefined ? "" : text).split("\n")) {
             if (/^\s*#/.test(raw))
                 continue;
@@ -100,6 +100,10 @@ Item {
             };
         }
         return out;
+    }
+
+    function fileUrl(p) {
+        return p === "" ? "" : "file://" + String(p).split("/").map(encodeURIComponent).join("/");
     }
 
     FileView {

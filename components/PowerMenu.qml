@@ -10,6 +10,8 @@ OverlayPanel {
 
     function open() {
         visible = true;
+
+        card.forceActiveFocus();
     }
     function close() {
         visible = false;
@@ -126,7 +128,7 @@ OverlayPanel {
                             Image {
                                 id: iconImg
                                 anchors.fill: parent
-                                source: "file://" + powerMenu.iconDir + "/" + btn.modelData.icon
+                                source: WallpaperMap.fileUrl(powerMenu.iconDir + "/" + btn.modelData.icon)
                                 fillMode: Image.PreserveAspectFit
                                 mipmap: true
                                 visible: false

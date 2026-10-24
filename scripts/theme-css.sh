@@ -5,7 +5,7 @@ set -uo pipefail
 name=${1:-}
 
 case "$name" in
-  ""|/*|*/*|*..*|.*) echo "用法: $0 <主题名>" >&2; exit 2 ;;
+  ""|/*|*/*|*..*|.*) echo "usage: $0 <theme-name>" >&2; exit 2 ;;
 esac
 
 entry=

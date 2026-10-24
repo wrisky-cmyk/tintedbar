@@ -17,7 +17,7 @@ bit4=$(read_prefer_dark "$cfg/gtk-4.0/settings.ini")
 bit3=$(read_prefer_dark "$cfg/gtk-3.0/settings.ini")
 
 if ! cur=$(gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null); then
-  echo "theme-apply: 读 color-scheme 失败, 只看 GTK 的 prefer-dark 位" >&2
+  echo "theme-apply: failed to read color-scheme, using only the GTK prefer-dark bit" >&2
   cur=""
 fi
 
@@ -26,7 +26,7 @@ case "${1:-}" in
   --force) case "${2:-}" in
              dark)  mode=dark ;;
              light) mode=light ;;
-             *) echo "用法: $0 [--force dark|light] | [--mode]" >&2; exit 1 ;;
+             *) echo "usage: $0 [--force dark|light] | [--mode]" >&2; exit 1 ;;
            esac ;;
 esac
 if [ -z "$mode" ]; then
@@ -69,15 +69,15 @@ if [ -n "$bit4" ] || [ -n "$bit3" ]; then
   want="'prefer-dark'"; [ "$mode" = light ] && want="'prefer-light'"
   if [ "$cur" != "$want" ] && { [ "$cur" = "'prefer-dark'" ] || [ "$cur" = "'prefer-light'" ]; }; then
 
-    echo "theme-apply: color-scheme 与 prefer-dark 位矛盾($cur vs 位=$mode), 单向对齐成 $want" >&2
+    echo "theme-apply: color-scheme contradicts prefer-dark bit ($cur vs bit=$mode), one-way aligning to $want" >&2
     gsettings set org.gnome.desktop.interface color-scheme "$want" 2>/dev/null \
-      || echo "theme-apply: 写 color-scheme=$want 失败" >&2
+      || echo "theme-apply: failed to write color-scheme=$want" >&2
   fi
 fi
 
 th=""
 if ! th=$(gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null); then
-  echo "theme-apply: 读 gtk-theme 失败, 跳过 GTK4 CSS 换脸" >&2
+  echo "theme-apply: failed to read gtk-theme, skipping GTK4 CSS swap" >&2
   exit 0
 fi
 th=${th#\'}; th=${th%\'}
@@ -103,13 +103,13 @@ if mkdir -p "$st" && tmp=$(mktemp "$st/theme-palette.XXXXXX"); then
     rm -f "$tmp"
   fi
 else
-  echo "theme-apply: 写 $st/theme-palette.json 失败, 读它的脚本会停在上一份" >&2
+  echo "theme-apply: failed to write $st/theme-palette.json, readers will stay on the previous copy" >&2
 fi
 
 missing=""
 [ -f "$theme_dir/gtk-4.0/gtk.css" ] || missing="gtk-4.0"
 [ -f "$theme_dir/gtk-3.0/gtk.css" ] || missing="${missing:+$missing/}gtk-3.0"
-[ -z "$missing" ] || echo "theme-apply: 主题 $th 没有 $missing 这两部分, 用户 CSS 会停在上一份" >&2
+[ -z "$missing" ] || echo "theme-apply: theme $th lacks the $missing parts, user CSS will stay on the previous copy" >&2
 
 if [ -f "$theme_dir/gtk-4.0/gtk.css" ]; then
 
@@ -123,7 +123,7 @@ if [ -f "$theme_dir/gtk-4.0/gtk.css" ]; then
   [ -f "$theme_dir/gtk-4.0/$variant" ] || variant='gtk.css'
 
   if ! tmp=$(mktemp "${dst}.XXXXXX"); then
-    echo "theme-apply: 建临时文件失败, 跳过 GTK4 CSS 换脸" >&2
+    echo "theme-apply: failed to create temp file, skipping GTK4 CSS swap" >&2
     exit 0
   fi
   if cp -- "$theme_dir/gtk-4.0/$variant" "$tmp"; then

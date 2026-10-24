@@ -3,7 +3,6 @@ pragma Singleton
 import QtQuick
 import QtQml
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Networking
 import Quickshell.Bluetooth
@@ -140,18 +139,19 @@ Item {
         const first = root.iconTheme === "";
         root.iconTheme = it;
         if (!first) {
-            root.iconCache = {};
-            root._iconProbeGen++;
-            root.iconProbesFinished();
+            IconProbe.iconCache = {};
+            IconProbe._iconProbeGen++;
+            IconProbe.iconProbesFinished();
         }
     }
 
     function applyGtkThemeName(raw) {
         const th = String(raw).trim().replace(/^'|'$/g, "");
         if (th === root.gtkThemeName)
-            return;
+            return false;
         root.gtkThemeName = th;
         root.reloadThemeCss();
+        return true;
     }
 
     function handleInterfaceChange(line) {
@@ -166,607 +166,12 @@ Item {
         else if (key === "icon-theme")
             root.applyIconTheme(val);
         else if (key === "gtk-theme") {
-            root.applyGtkThemeName(val);
-            root.gtkThemeChanged();
+            if (root.applyGtkThemeName(val))
+                root.gtkThemeChanged();
         }
     }
 
-    readonly property string compositor: {
-        const d = String(Quickshell.env("XDG_CURRENT_DESKTOP") || "").toLowerCase();
-        if (d.indexOf("niri") >= 0)
-            return "niri";
-
-        if (d.indexOf("hyprland") >= 0)
-            return "hyprland";
-        if (String(Quickshell.env("NIRI_SOCKET") || "") !== "")
-            return "niri";
-        return "hyprland";
-    }
-
-    property var niriWindows: []
-    property var niriWsList: []
-    property int niriFocusedIdx: 1
-
-    property string niriFocusedOutput: ""
-    property string niriLayout: ""
-
-    property var niriLayoutNames: []
-
-    signal compositorUpdated
-
-    Process {
-        id: niriSnapshot
-        running: root.compositor === "niri"
-        command: ["sh", "-c", "for i in $(seq 1 50); do [ -S \"$NIRI_SOCKET\" ] && break; sleep 0.2; done; " + "niri msg --json windows; printf '\n--WS--\n'; niri msg --json workspaces"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                let sawMarker = false;
-                const stage = {
-                    s: "windows"
-                };
-                for (const line of String(text).split("\n")) {
-                    const t = line.trim();
-                    if (t === "")
-                        continue;
-                    if (t === "--WS--") {
-                        stage.s = "workspaces";
-                        sawMarker = true;
-                        continue;
-                    }
-                    try {
-                        const arr = JSON.parse(t);
-                        if (stage.s === "windows")
-                            root.applyNiriWindows(arr);
-                        else
-                            root.applyNiriWorkspaces(arr);
-                    } catch (e) {}
-                }
-                root.niriRebind();
-                root.compositorUpdated();
-                if (!sawMarker && root.compositor === "niri" && niriSnapshotRetry.retryCount < 3)
-                    niriSnapshotRetry.restart();
-            }
-        }
-    }
-    Timer {
-        id: niriSnapshotRetry
-        property int retryCount: 0
-        interval: 1500
-        onTriggered: {
-            retryCount++;
-            if (root.compositor === "niri")
-                niriSnapshot.running = true;
-        }
-    }
-
-    Process {
-        id: niriEvents
-        running: root.compositor === "niri"
-        command: ["sh", "-c", "for i in $(seq 1 50); do [ -S \"$NIRI_SOCKET\" ] && break; sleep 0.2; done; " + "exec niri msg --json event-stream"]
-        stdout: SplitParser {
-            onRead: data => root.handleNiriEvent(data)
-        }
-        onExited: niriEventRetry.restart()
-    }
-    Timer {
-        id: niriEventRetry
-        interval: 2000
-        onTriggered: if (root.compositor === "niri" && !niriEvents.running)
-            niriEvents.running = true
-    }
-
-    function applyNiriWindows(arr) {
-        const kept = [];
-        for (const w of arr) {
-            let e = null;
-
-            const app = String(w.app_id || "");
-            for (const old of root.niriWindows)
-                if (old.wid === w.id) {
-                    e = old;
-                    break;
-                }
-            if (!e) {
-                e = {
-                    wid: w.id,
-                    wsid: w.workspace_id,
-                    focused: false,
-                    wsIdx: 1,
-                    layout: w.layout,
-                    obj: {
-                        __wid: w.id,
-                        class: app,
-                        title: String(w.title || ""),
-                        wayland: {
-                            appId: app
-                        },
-                        lastIpcObject: {
-                            class: app,
-                            initialClass: app
-                        }
-                    }
-                };
-            } else {
-                e.obj.title = String(w.title || "");
-                e.obj.class = app;
-                e.obj.wayland.appId = app;
-                e.obj.lastIpcObject.class = app;
-                e.wsid = w.workspace_id;
-                e.layout = w.layout;
-            }
-            e.focused = !!w.is_focused;
-            kept.push(e);
-        }
-        root.niriWindows = kept;
-    }
-
-    function applyNiriWorkspaces(arr) {
-        const out = [];
-        for (const w of arr)
-            out.push({
-                id: w.id,
-                idx: w.idx,
-                focused: !!w.is_focused,
-                output: String(w.output || "")
-            });
-        root.niriWsList = out;
-        for (const ws of out)
-            if (ws.focused) {
-                root.niriFocusedIdx = ws.idx;
-                root.niriFocusedOutput = ws.output;
-            }
-    }
-
-    function niriRebind() {
-        const idxById = {};
-        for (const ws of root.niriWsList)
-            idxById[ws.id] = ws.idx;
-        for (const w of root.niriWindows)
-            w.wsIdx = idxById[w.wsid] || 1;
-    }
-
-    function handleNiriEvent(line) {
-        const t = line.trim();
-        if (t === "")
-            return;
-        let ev;
-        try {
-            ev = JSON.parse(t);
-        } catch (e) {
-            return;
-        }
-        const key = Object.keys(ev)[0];
-        const v = ev[key];
-        if (key === "WorkspacesChanged") {
-            root.applyNiriWorkspaces(v.workspaces);
-            root.niriRebind();
-        } else if (key === "WorkspaceActivated") {
-            for (const ws of root.niriWsList)
-                ws.focused = (ws.id === v.id) && v.focused !== false;
-            for (const ws of root.niriWsList)
-                if (ws.focused) {
-                    root.niriFocusedIdx = ws.idx;
-                    root.niriFocusedOutput = ws.output;
-                }
-        } else if (key === "WindowsChanged") {
-            root.applyNiriWindows(v.windows);
-            root.niriRebind();
-        } else if (key === "WindowOpenedOrChanged") {
-            const w = v.window;
-            const app = String(w.app_id || "");
-            let found = null;
-            for (const old of root.niriWindows)
-                if (old.wid === w.id) {
-                    found = old;
-                    break;
-                }
-            if (found) {
-                found.obj.title = String(w.title || "");
-                found.obj.class = app;
-                found.obj.wayland.appId = app;
-                found.obj.lastIpcObject.class = app;
-                found.wsid = w.workspace_id;
-                found.focused = !!w.is_focused;
-                found.layout = w.layout;
-
-                root.niriWindows = root.niriWindows.slice();
-            } else {
-                root.niriWindows = root.niriWindows.concat([
-                    {
-                        wid: w.id,
-                        wsid: w.workspace_id,
-                        focused: !!w.is_focused,
-                        wsIdx: 1,
-                        layout: w.layout,
-                        obj: {
-                            __wid: w.id,
-                            class: app,
-                            title: String(w.title || ""),
-                            wayland: {
-                                appId: app
-                            },
-                            lastIpcObject: {
-                                class: app,
-                                initialClass: app
-                            }
-                        }
-                    }
-                ]);
-            }
-            root.niriRebind();
-        } else if (key === "WindowClosed") {
-            const cid = (v.id !== undefined) ? v.id : v.window_id;
-            root.niriWindows = root.niriWindows.filter(w => String(w.wid) !== String(cid));
-        } else if (key === "WindowFocusChanged") {
-            for (const w of root.niriWindows)
-                w.focused = (w.wid === v.id);
-
-            root.niriWindows = root.niriWindows.slice();
-        } else if (key === "WindowTitleChanged") {
-            for (const w of root.niriWindows)
-                if (w.wid === v.id)
-                    w.obj.title = String(v.title || "");
-
-            root.niriWindows = root.niriWindows.slice();
-        } else if (key === "KeyboardLayoutsChanged") {
-            const kb = v.keyboard_layouts || {};
-            root.niriLayoutNames = kb.names || [];
-            root.niriLayout = String(root.niriLayoutNames[kb.current_idx] || "");
-        } else if (key === "KeyboardLayoutSwitched") {
-            root.niriLayout = String(root.niriLayoutNames[v.idx] || v.idx);
-        } else if (key === "WindowLayoutsChanged") {
-            for (const c of (v.changes || [])) {
-                const wid = Array.isArray(c) ? c[0] : c.id;
-                const layout = Array.isArray(c) ? c[1] : c.layout;
-                for (const w of root.niriWindows)
-                    if (String(w.wid) === String(wid)) {
-                        w.layout = layout;
-                        break;
-                    }
-            }
-        } else if (key === "ConfigLoaded") {
-            return;
-        } else {
-            return;
-        }
-        root.recomputeNiriFullscreen();
-        root.compositorUpdated();
-    }
-
-    readonly property string activeTitle: root.compositor === "niri" ? (function () {
-            const w = root.niriWindows.find(x => x.focused);
-            return w ? w.obj.title : "";
-        })() : (function () {
-            const t = Hyprland.activeToplevel;
-            if (!t)
-                return "";
-            let wid = -1;
-            try {
-                if (t.workspace && t.workspace.id !== undefined)
-                    wid = t.workspace.id;
-                else if (t.lastIpcObject && t.lastIpcObject.workspace && t.lastIpcObject.workspace.id !== undefined)
-                    wid = t.lastIpcObject.workspace.id;
-            } catch (e) {}
-            const ws = wid >= 0 ? root.workspaceForId(wid) : null;
-            if (ws && !ws.focused)
-                return "";
-            return t.title ? String(t.title) : "";
-        })()
-
-    function niriWorkspaceFor(outputName, id) {
-        for (const ws of root.niriWsList) {
-            if (ws.idx !== id)
-                continue;
-            if (outputName === "" || ws.output === outputName)
-                return ws;
-        }
-        return null;
-    }
-
-    function windowsForWorkspace(id, outputName) {
-        if (root.compositor === "niri") {
-            const ws = root.niriWorkspaceFor(outputName || root.niriFocusedOutput, id);
-            if (!ws)
-                return [];
-            const out = [];
-            for (const w of root.niriWindows)
-                if (w.wsid === ws.id)
-                    out.push(w.obj);
-            return out;
-        }
-        const ws = root.workspaceForId(id);
-        return ws ? root.modelValues(ws.toplevels) : [];
-    }
-
-    function workspaceFocused(id, outputName) {
-        if (root.compositor === "niri") {
-            if (outputName === "" || root.niriFocusedOutput === "")
-                return root.niriFocusedIdx === id;
-            return root.niriFocusedOutput === outputName && root.niriFocusedIdx === id;
-        }
-        const ws = root.workspaceForId(id);
-        return ws ? ws.focused : false;
-    }
-
-    function setDpms(enable) {
-        if (root.compositor === "niri") {
-            Quickshell.execDetached(["niri", "msg", "action", enable ? "power-on-monitors" : "power-off-monitors"]);
-            return;
-        }
-        if (Hyprland.usingLua) {
-            Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.dpms(\"" + (enable ? "on" : "off") + "\")"]);
-        } else {
-            Quickshell.execDetached(["hyprctl", "dispatch", "dpms", enable ? "on" : "off"]);
-        }
-    }
-
-    function closeWindow() {
-        if (root.compositor === "niri") {
-            Quickshell.execDetached(["niri", "msg", "action", "close-window"]);
-            return;
-        }
-        if (Hyprland.usingLua) {
-            Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.window.close()"]);
-        } else {
-            Quickshell.execDetached(["hyprctl", "dispatch", "killwindow"]);
-        }
-    }
-
-    function activateWorkspace(id, outputName) {
-        if (root.compositor === "niri") {
-            if (outputName === "" || outputName === root.niriFocusedOutput) {
-                Quickshell.execDetached(["niri", "msg", "action", "focus-workspace", String(id)]);
-            } else {
-                Quickshell.execDetached(["sh", "-c", "niri msg action focus-monitor " + root.sq(outputName) + " && niri msg action focus-workspace " + root.sq(String(id))]);
-            }
-            return;
-        }
-        const ws = root.workspaceForId(id);
-        if (ws) {
-            ws.activate();
-            return;
-        }
-        if (Hyprland.usingLua) {
-            Hyprland.dispatch('hl.dsp.focus({ workspace = "' + root.luaStr(String(id)) + '" })');
-        } else {
-            Hyprland.dispatch("workspace " + id);
-        }
-    }
-
-    property string hyprLayout: ""
-    Connections {
-        target: root.compositor === "hyprland" ? Hyprland : null
-        function onRawEvent(event) {
-            if (String(event.name) !== "activelayout")
-                return;
-            const parts = String(event.data || "").split(",");
-            if (parts.length >= 2)
-                root.hyprLayout = parts[1];
-        }
-    }
-    function layoutShort() {
-        const n = root.compositor === "niri" ? root.niriLayout : root.hyprLayout;
-        if (!n)
-            return "";
-        const m = String(n).match(/\(([^)]+)\)/);
-        return m ? m[1].toLowerCase() : String(n).slice(0, 2).toLowerCase();
-    }
-
-    property bool fullscreenActive: false
-
-    onFullscreenActiveChanged: console.log("[FS] 聚焦窗口全屏 = " + (fullscreenActive ? "是" : "否"))
-
-    property bool fullscreenWatch: true
-    Process {
-        id: hyprFullscreenQuery
-        running: false
-
-        command: ["sh", "-c", "hyprctl -j activewindow 2>/dev/null | tr ',' '\\n' " + "| grep -oE '\"fullscreen[^\"]*\": *[0-9]+' | grep -oE '[0-9]+$' | sort -n | tail -1"]
-        stdout: StdioCollector {
-
-            onStreamFinished: root.fullscreenActive = Number(String(text).trim() || "0") >= 2
-        }
-    }
-
-    function refreshHyprFullscreen() {
-        hyprFullscreenQuery.running = true;
-    }
-
-    Timer {
-        interval: 60000
-        repeat: true
-        running: root.compositor === "hyprland" && root.fullscreenWatch
-        triggeredOnStart: true
-        onTriggered: root.refreshHyprFullscreen()
-    }
-    Connections {
-        target: root.compositor === "hyprland" ? Hyprland : null
-        function onRawEvent(event) {
-            const n = String(event.name);
-            if (n !== "fullscreen" && n !== "fullscreenv2")
-                return;
-
-            root.refreshHyprFullscreen();
-        }
-    }
-
-    function recomputeNiriFullscreen() {
-        if (root.compositor !== "niri")
-            return;
-        let w = null;
-        for (const e of root.niriWindows)
-            if (e.focused) {
-                w = e;
-                break;
-            }
-        const out = Quickshell.screens.find(s => s.name === root.niriFocusedOutput);
-        root.fullscreenActive = !!(out && w && w.layout && w.layout.window_size && Number(w.layout.window_size[0]) === out.width && Number(w.layout.window_size[1]) === out.height);
-    }
-
-    Timer {
-        interval: 30000
-        repeat: true
-
-        running: root.compositor === "niri" && root.fullscreenWatch
-        triggeredOnStart: true
-        onTriggered: niriFullscreenQuery.running = true
-    }
-    Process {
-        id: niriFullscreenQuery
-        command: ["niri", "msg", "--json", "focused-window"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    const w = JSON.parse(text);
-                    for (const e of root.niriWindows)
-                        if (String(e.wid) === String(w.id)) {
-                            e.layout = w.layout;
-                            break;
-                        }
-                } catch (e) {}
-                root.recomputeNiriFullscreen();
-            }
-        }
-    }
-
-    readonly property var appNameAlias: {
-        "微信": "wechat",
-        "企业微信": "wxwork",
-        "QQ音乐": "qqmusic",
-        "网易云音乐": "netease-cloud-music-gtk4"
-    }
-
-    function focusAppWindow(candidates) {
-        const keys = [];
-        for (const c of candidates) {
-            if (!c)
-                continue;
-            const s = String(c).toLowerCase();
-            if (s !== "" && keys.indexOf(s) < 0)
-                keys.push(s);
-            const alias = root.appNameAlias[String(c)];
-            if (alias && keys.indexOf(alias) < 0)
-                keys.push(alias);
-        }
-        if (keys.length === 0)
-            return false;
-        if (root.debug)
-            console.log("[FOCUS] keys=" + JSON.stringify(keys));
-        if (root.compositor === "niri") {
-            let hit = null;
-            for (const w of root.niriWindows) {
-                if (!root.matchKeys(w.obj.class, keys))
-                    continue;
-                if (w.focused) {
-                    hit = w;
-                    break;
-                }
-                if (hit === null)
-                    hit = w;
-            }
-            if (hit === null)
-                return false;
-            Quickshell.execDetached(["niri", "msg", "action", "focus-window", "--id", String(hit.wid)]);
-            return true;
-        }
-
-        let best = null;
-        let bestCls = "";
-        let bestAddr = "";
-        for (const ws of root.modelValues(Hyprland.workspaces)) {
-            for (const t of root.modelValues(ws.toplevels)) {
-                let cls = "";
-                try {
-                    cls = (t.wayland && t.wayland.appId) ? String(t.wayland.appId) : (t.lastIpcObject ? String(t.lastIpcObject["class"] || "") : "");
-                } catch (e) {
-                    cls = "";
-                }
-                if (root.debug)
-                    console.log("[FOCUS] 扫描 class=" + cls);
-                if (!root.matchKeys(cls, keys))
-                    continue;
-                best = t;
-                bestCls = cls;
-                try {
-                    bestAddr = t.lastIpcObject ? String(t.lastIpcObject["address"] || "") : "";
-                } catch (e) {
-                    bestAddr = "";
-                }
-                break;
-            }
-            if (best !== null)
-                break;
-        }
-        if (best === null)
-            return false;
-        if (root.debug)
-            console.log("[FOCUS] 命中 class=" + bestCls + " (兜底 addr=" + bestAddr + ")");
-        focusPick.candKeys = keys;
-        focusPick.fallbackCls = bestCls;
-        focusPick.fallbackAddr = bestAddr;
-        focusPick.command = ["hyprctl", "-j", "clients"];
-        focusPick.running = true;
-        return true;
-    }
-
-    function matchKeys(cls, keys) {
-        const c = String(cls || "").toLowerCase();
-        if (c === "")
-            return false;
-        for (const k of keys)
-            if (c.indexOf(k) >= 0 || k.indexOf(c) >= 0)
-                return true;
-        return false;
-    }
-
-    Process {
-        id: focusPick
-        property var candKeys: []
-        property string fallbackCls: ""
-        property string fallbackAddr: ""
-        stdout: StdioCollector {
-            onStreamFinished: {
-                let list = [];
-                try {
-                    list = JSON.parse(text);
-                } catch (e) {
-                    list = [];
-                }
-                let cls = "";
-                let addr = "";
-                let fh = 1e9;
-                for (const c of list) {
-                    if (!root.matchKeys(String(c.class || ""), focusPick.candKeys))
-                        continue;
-                    const v = c.focusHistoryID;
-                    const h = (typeof v === "number" && v >= 0) ? v : 1e9;
-                    if (addr === "" || h < fh) {
-                        cls = String(c.class || "");
-                        addr = String(c.address || "");
-                        fh = h;
-                    }
-                }
-
-                if (addr === "" && cls === "") {
-                    cls = focusPick.fallbackCls;
-                    addr = focusPick.fallbackAddr;
-                }
-                if (addr === "" && cls === "")
-                    return;
-                root.focusWindowByAddress(cls, addr);
-            }
-        }
-    }
-
-    function focusWindowByAddress(cls, addr) {
-        const sel = addr !== "" ? "address:" + root.luaStr(addr) : "class:" + root.luaStr(cls);
-
-        if (Hyprland.usingLua) {
-            Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"" + sel + "\" })"]);
-        } else {
-            Quickshell.execDetached(["hyprctl", "dispatch", "focuswindow", sel]);
-        }
-    }
+    readonly property string compositor: Compositor.name
 
     property string gtkThemeName: ""
 
@@ -982,14 +387,14 @@ Item {
             list = [];
         }
         if (list.length === 0)
-            return "还没扫到(刚启动的话稍后再敲一次; 一个主题都没装也会是这句)";
+            return "not scanned yet (retry shortly if just started; also shown when no themes installed)";
         const tableThemes = root.paletteIds.map(id => root.themeNameFor(id));
         const lines = list.map(e => {
             const i = tableThemes.indexOf(e.name);
-            return e.name + "\t" + e.accent + (i >= 0 ? "\t= 家族 " + root.paletteIds[i] : "\t(未收录)");
+            return e.name + "\t" + e.accent + (i >= 0 ? "\t= family " + root.paletteIds[i] : "\t(not in table)");
         });
         const missing = tableThemes.filter(n => !list.some(e => e.name === n));
-        return "扫到 " + list.length + " 个已装主题:\n" + lines.join("\n") + "\n表里有但机器上没装: " + (missing.length ? missing.join(" ") : "(无)");
+        return "scanned " + list.length + " installed themes:\n" + lines.join("\n") + "\nin table but not installed: " + (missing.length ? missing.join(" ") : "(none)");
     }
 
     Process {
@@ -1064,7 +469,7 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.10.19"
+    readonly property string version: "26.10.24"
 
     readonly property string fingerprintCmd: "find shell.qml components scripts icons -type f ! -name '.*' ! -name '*~' ! -name '*.swp' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8"
     property string packedVersion: ""
@@ -1086,7 +491,7 @@ Item {
                 try {
                     o = JSON.parse(String(text) || "{}");
                 } catch (e) {
-                    console.log("[QS] manifest.json 不是合法 JSON, 跳过指纹判定: " + e);
+                    console.log("[QS] manifest.json is not valid JSON, skip fingerprint check: " + e);
                     return;
                 }
                 root.packedVersion = String(o.version || "");
@@ -1096,7 +501,7 @@ Item {
                 if (root.packedFingerprint !== "")
                     fingerprintCalc.running = true;
                 else
-                    console.log("[QS] 没有 manifest.json(开发树), 版本行只报版本号");
+                    console.log("[QS] no manifest.json (dev tree), version line reports version only");
             }
         }
     }
@@ -1108,9 +513,9 @@ Item {
             onStreamFinished: {
                 root.localFingerprint = String(text).trim();
                 if (root.modified)
-                    console.log("[QS] 配置内容与发布时不同: 期望 " + root.packedFingerprint + ", 实得 " + root.localFingerprint + " (packaging=" + root.packedPackaging + ")");
+                    console.log("[QS] config content differs from release: expected " + root.packedFingerprint + ", got " + root.localFingerprint + " (packaging=" + root.packedPackaging + ")");
                 else
-                    console.log("[QS] 配置指纹 " + root.localFingerprint + " (与 manifest 一致)");
+                    console.log("[QS] config fingerprint " + root.localFingerprint + " (matches manifest)");
             }
         }
     }
@@ -1122,35 +527,10 @@ Item {
     readonly property string configDir: Quickshell.shellDir
 
     function modelValues(model) {
-        if (!model)
-            return [];
-        try {
-            if (model.values) {
-                return typeof model.values === "function" ? model.values() : model.values;
-            }
-        } catch (e) {}
-        const out = [];
-        try {
-            const n = model.count !== undefined ? model.count : model.length;
-            for (let i = 0; i < n; i++) {
-                const v = model.get ? model.get(i) : model.objectAt(i);
-                if (v)
-                    out.push(v);
-            }
-        } catch (e) {}
-        return out;
+        return Compositor.modelValues(model);
     }
 
-    property var iconCache: ({})
     property var desktopEntryCache: ({})
-
-    function iconCacheGet(key) {
-        return (key in root.iconCache) ? root.iconCache[key] : undefined;
-    }
-
-    function iconCacheSet(key, path) {
-        root.iconCache[key] = path;
-    }
 
     function appForClass(cls) {
         if (!cls)
@@ -1183,11 +563,11 @@ Item {
     }
 
     Component.onCompleted: {
-        console.log("[QS] 配置版本 " + root.version);
+        console.log("[QS] config version " + root.version);
         if (!root.cjkFontOk)
-            console.warn("[FONT] 未检测到字体 \"" + root.cjkFont + "\", 回退系统默认");
+            console.warn("[FONT] font not found \"" + root.cjkFont + "\", falling back to default");
         if (!root.nerdFontOk)
-            console.warn("[FONT] 未检测到字体 \"" + root.nerdFont + "\", 回退系统默认(nerd 图标字形可能缺失)");
+            console.warn("[FONT] font not found \"" + root.nerdFont + "\", falling back to default (nerd icon glyphs may be missing)");
         DesktopEntries.applicationsChanged.connect(() => {
             root.desktopEntryCache = {};
         });
@@ -1220,11 +600,7 @@ Item {
     }
 
     function sq(s) {
-        return "'" + String(s).replace(/'/g, "'\\''") + "'";
-    }
-
-    function luaStr(s) {
-        return String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+        return Compositor.sq(s);
     }
 
     function atomicWriteCmd(path, json) {
@@ -1244,141 +620,6 @@ Item {
         if (s === "")
             return;
         Quickshell.execDetached(["bash", "-c", "exec " + root.sq(root.configDir + "/scripts/launch-desktop.sh") + " " + root.sq(s)]);
-    }
-
-    signal iconProbesFinished
-    property var _iconQueue: ({})
-    property var _iconProbePending: []
-
-    property int _iconProbeGen: 0
-    property int _iconProbeBatchGen: 0
-
-    Timer {
-        id: iconProbeFlush
-        interval: 50
-        onTriggered: root.flushIconProbeQueue()
-    }
-
-    Process {
-        id: iconProbeProc
-        running: false
-        stdout: StdioCollector {
-            waitForEnd: true
-            onStreamFinished: root.iconProbeBatchDone(text)
-        }
-    }
-
-    function requestIconProbe(key, names) {
-        if (root.iconCacheGet(key) !== undefined)
-            return;
-        if (root._iconQueue[key])
-            return;
-        root._iconQueue[key] = names;
-        iconProbeFlush.restart();
-    }
-
-    function flushIconProbeQueue() {
-        if (iconProbeProc.running) {
-            iconProbeFlush.restart();
-            return;
-        }
-        const queue = root._iconQueue;
-        const keys = Object.keys(queue);
-        if (keys.length === 0)
-            return;
-        root._iconQueue = {};
-        root._iconProbePending = keys;
-        root._iconProbeBatchGen = root._iconProbeGen;
-        let s = root.iconProbeFunc();
-        s += "probe() {\n";
-        s += "  for n in \"$@\"; do\n";
-        s += "    try_name \"$n\" && return 0\n";
-        s += "  done\n";
-        s += "  return 1\n";
-        s += "}\n";
-        for (const k of keys) {
-            let names = "";
-            for (const n of queue[k])
-                names += " " + root.sq(n);
-
-            s += "p=\"$(probe" + names + ")\"\n";
-            s += "printf '%s\\037%s\\n' " + root.sq(k) + " \"$p\"\n";
-        }
-        iconProbeProc.command = ["sh", "-c", s];
-        iconProbeProc.running = true;
-    }
-
-    function iconProbeBatchDone(text) {
-        const stale = root._iconProbeBatchGen !== root._iconProbeGen;
-        if (!stale) {
-            for (const line of String(text).split("\n")) {
-                if (line === "")
-                    continue;
-                const sep = line.indexOf("\u001f");
-                if (sep < 0)
-                    continue;
-                const key = line.substring(0, sep);
-                const path = line.substring(sep + 1).trim();
-                if (key in root.iconCache)
-                    continue;
-                root.iconCacheSet(key, path);
-            }
-
-            for (const k of root._iconProbePending) {
-                if (root.iconCacheGet(k) === undefined)
-                    root.iconCacheSet(k, "");
-            }
-        }
-        root._iconProbePending = [];
-        root.iconProbesFinished();
-    }
-
-    function iconProbeFunc() {
-        let s = "";
-        s += "t=\"$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null";
-
-        s += " | sed -n \"s/^'//;s/'$//p\")\"\n";
-        s += "[ -n \"$t\" ] || t=\"$(sed -n 's/^gtk-icon-theme-name=//p'";
-        s += " \"$HOME/.config/gtk-3.0/settings.ini\" 2>/dev/null)\"\n";
-        s += "[ -n \"$t\" ] || t=hicolor\n";
-        s += "try_name() {\n";
-        s += "  n=\"$1\"\n";
-
-        s += "  ths=\"$t\"\n";
-        s += "  for base in \"$HOME/.local/share/icons\" /usr/share/icons; do\n";
-        s += "    [ -f \"$base/$t/index.theme\" ] && ths=\"$ths";
-        s += " $(sed -n 's/^Inherits=//p' \"$base/$t/index.theme\" | tr ',' ' ')\"\n";
-        s += "  done\n";
-        s += "  ths=\"$ths hicolor Adwaita default\"\n";
-        s += "  for th in $ths; do\n";
-        s += "    for base in \"$HOME/.local/share/icons\" /usr/share/icons; do\n";
-        s += "      [ -d \"$base/$th\" ] || continue\n";
-        s += "      # 不写死尺寸: 直接扫所有尺寸目录(含 512x512、@2x 等)\n";
-        s += "      for c in apps actions status devices places categories mimetypes panel; do\n";
-        s += "        for f in \"$base/$th\"/*/\"$c\"/\"$n\".svg";
-        s += " \"$base/$th\"/*/\"$c\"/\"$n\".png; do\n";
-        s += "          [ -f \"$f\" ] && { printf '%s\\n' \"$f\"; exit 0; }\n";
-        s += "        done\n";
-        s += "      done\n";
-        s += "      for c in apps actions status devices places categories emblems; do\n";
-        s += "        for f in \"$base/$th\"/*/symbolic/\"$c\"/\"$n\".svg";
-        s += " \"$base/$th\"/*/symbolic/\"$c\"/\"$n\".png; do\n";
-        s += "          [ -f \"$f\" ] && { printf '%s\\n' \"$f\"; exit 0; }\n";
-        s += "        done\n";
-        s += "      done\n";
-        s += "      for c in apps actions status devices places categories emblems mimetypes; do\n";
-        s += "        f=\"$base/$th/symbolic/$c/$n.svg\"\n";
-        s += "        [ -f \"$f\" ] && { printf '%s\\n' \"$f\"; exit 0; }\n";
-        s += "      done\n";
-        s += "    done\n";
-        s += "  done\n";
-        s += "  for p in /usr/share/pixmaps/$n.svg /usr/share/pixmaps/$n.png";
-        s += " /usr/share/pixmaps/$n.xpm; do\n";
-        s += "    [ -f \"$p\" ] && { printf '%s\\n' \"$p\"; exit 0; }\n";
-        s += "  done\n";
-        s += "  return 1\n";
-        s += "}\n";
-        return s;
     }
 
     function glyphFor(cls, title) {
@@ -1422,14 +663,6 @@ Item {
             if (c.indexOf(key) >= 0)
                 return byClass[key];
         return "\uF059";
-    }
-
-    function workspaceForId(id) {
-        for (const w of root.modelValues(Hyprland.workspaces)) {
-            if (w && w.id === id)
-                return w;
-        }
-        return null;
     }
 
     function connectedWifi() {
@@ -1619,7 +852,7 @@ Item {
     readonly property string btCacheDesc: {
         const a = root.btAdapter();
         if (!a)
-            return "无适配器对象";
+            return "no adapter object";
         return "enabled=" + a.enabled + " state=" + BluetoothAdapterState.toString(a.state);
     }
 
@@ -1643,7 +876,7 @@ Item {
             if (now !== root.btNotified) {
                 if (!root.btMissedLogged) {
                     root.btMissedLogged = true;
-                    console.warn("[BT] 图标状态是自己纠正回来的: 通知侧以为 " + root.btNotified + ", 实际 " + now + " —— 后端漏发了变更通知(§4.9); 已按实际值修正");
+                    console.warn("[BT] icon state self-corrected: notification side thought " + root.btNotified + ", actual " + now + " —— backend missed change notification (§4.9); corrected to actual");
                 }
                 root.btNotified = now;
             }
@@ -1692,7 +925,7 @@ Item {
 
             if (root.btProbeOn && root.btAdapter() !== null && !root.btProbeLogged && !wantOpen) {
                 root.btProbeLogged = true;
-                console.warn("[BT] 后端缓存不可信(" + root.btCacheDesc + "), BlueZ 实际 Powered=true —— 图标按开着显示(busctl 直接问的, §4.9)");
+                console.warn("[BT] backend cache untrustworthy (" + root.btCacheDesc + "), BlueZ actually Powered=true —— icon shows on (asked busctl directly, §4.9)");
             }
         }
     }
@@ -1715,7 +948,7 @@ Item {
         command: ["rfkill", "unblock", "bluetooth"]
         onExited: code => {
             if (code !== 0)
-                console.warn("[BT] rfkill unblock bluetooth 退出码 " + code + " —— 没解掉阻断, 仍试一次写后端(§4.9)");
+                console.warn("[BT] rfkill unblock bluetooth exit code " + code + " —— block not lifted, still try one backend write (§4.9)");
 
             if (!root.btWantOn)
                 return;
@@ -1725,7 +958,7 @@ Item {
                 a.enabled = true;
                 return;
             }
-            console.log("[BT] 解阻断后后端缓存仍是 " + root.btCacheDesc + ", 这条写改用 busctl 直接写 BlueZ(§4.9)");
+            console.log("[BT] backend cache still says " + root.btCacheDesc + " after unblock, this write goes to BlueZ directly via busctl (§4.9)");
             Quickshell.execDetached(["busctl", "--system", "set-property", "org.bluez", a ? String(a.dbusPath) : "/org/bluez/hci0", "org.bluez.Adapter1", "Powered", "b", "true"]);
         }
     }
@@ -1737,7 +970,7 @@ Item {
                 return;
             if (!root.btProbeKnown || root.btProbeOn)
                 return;
-            console.warn("[BT] 开后端 1.5s 还没亮(BlueZ 报 Powered=false), 绕过后端用 busctl 直接写一次" + " —— 多半是后端缓存还记着 rfkill 阻断, `rfkill list bluetooth` 可对账(§4.9)");
+            console.warn("[BT] still off 1.5s after backend on (BlueZ says Powered=false), bypass backend and write once via busctl" + " —— most likely backend cache still remembers rfkill block, cross-check with `rfkill list bluetooth` (§4.9)");
             Quickshell.execDetached(["busctl", "--system", "set-property", "org.bluez", root.btAdapter() ? String(root.btAdapter().dbusPath) : "/org/bluez/hci0", "org.bluez.Adapter1", "Powered", "b", "true"]);
         }
     }
@@ -1767,7 +1000,7 @@ Item {
         root.btWantOn = want;
         root.btWantOpen = true;
         if (want) {
-            root.btUnblock("要开蓝牙");
+            root.btUnblock("bt on");
             return "rfkill";
         }
         if (a) {
@@ -1790,9 +1023,14 @@ Item {
         return n < 10 ? "0" + n : "" + n;
     }
 
-    function timeStr(seconds) {
+    function timeStr(seconds, h24) {
         const d = new Date();
 
+        if (h24 === false) {
+            const h = d.getHours();
+            const core = (h % 12 === 0 ? 12 : h % 12) + ":" + root.pad(d.getMinutes()) + (seconds === undefined || seconds ? ":" + root.pad(d.getSeconds()) : "");
+            return I18n.t(h < 12 ? "time.12h.am" : "time.12h.pm").replace("%s", core);
+        }
         let s = root.pad(d.getHours()) + ":" + root.pad(d.getMinutes());
         if (seconds === undefined || seconds)
             s += ":" + root.pad(d.getSeconds());

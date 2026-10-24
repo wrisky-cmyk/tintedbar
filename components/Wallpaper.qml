@@ -45,7 +45,8 @@ Item {
                 Image {
                     id: wpImage
                     anchors.fill: parent
-                    source: bg.wpPath !== "" ? "file://" + bg.wpPath : ""
+
+                    source: WallpaperMap.fileUrl(bg.wpPath)
 
                     sourceSize.width: bg.decodeWidth
                     fillMode: bg.wpMode === "contain" ? Image.PreserveAspectFit : (bg.wpMode === "tile" ? Image.Tile : Image.PreserveAspectCrop)
@@ -56,7 +57,7 @@ Item {
 
                     onStatusChanged: {
                         if (status === Image.Error)
-                            console.log("[WALLPAPER] " + bg.screenName + " 加载失败: " + source);
+                            console.log("[WALLPAPER] " + bg.screenName + " load failed: " + source);
                     }
                 }
             }

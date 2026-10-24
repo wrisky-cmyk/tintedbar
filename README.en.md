@@ -37,7 +37,7 @@ There is no persistent Python/Node process, and it uses the network only for wea
 | Hyprland or niri (`hyprctl` / `niri msg`) | Workspaces, titles, focus, DPMS |
 | D-Bus session bus + NetworkManager / UPower / BlueZ / PipeWire / notification service | Network, battery, Bluetooth, volume, notifications; missing services leave the corresponding module empty without crashing |
 | `sh` + coreutils (`grep`/`sed`/`find`/`df`) | Read `/proc`, `/sys`, and invoke CLI tools |
-| Fonts **JetBrainsMono Nerd Font** + **Noto Sans CJK SC** | Icon glyphs and Chinese; falls back to system fonts with a `[FONT]` WARN (tofu boxes are common) |
+| Fonts **JetBrainsMono Nerd Font (v3+)** + **Noto Sans CJK SC** | Icon glyphs and Chinese; falls back to system fonts with a `[FONT]` WARN. **v3 or newer required**: brightness/weather/bluetooth-off glyphs use v3-remapped codepoints and break (silently) on v2 |
 
 **Optional, per module** (missing pieces only affect that module):
 
@@ -45,6 +45,7 @@ There is no persistent Python/Node process, and it uses the network only for wea
 | --- | --- |
 | `cliphist` + wl-clipboard | Clipboard panel. **Add the writer to your compositor autostart**: `wl-paste --watch cliphist store` |
 | `curl` | Weather (requests Open-Meteo every 30 minutes only while enabled) |
+| `ddcutil` | External monitor brightness (DDC/CI; user must be in the `i2c` group). Built-in screen backlight goes through logind and needs no package |
 | `gsettings` / `gio` (or `xdg-open`) | Follow system light/dark mode / open apps from the launcher |
 | `notify-send` (libnotify) | Notification action for the reboot prompt; the icon remains clickable but shows no details without it |
 | `systemctl` / `loginctl` | Power-menu shutdown / reboot / suspend / logout |
@@ -96,6 +97,7 @@ qs ipc call wallpaper reload          # reload wallpaper mappings
 qs ipc call bt toggle                 # toggle Bluetooth power
 qs ipc call audio mute                # mute/unmute the default output
 qs ipc call net toggle                # disconnect/reconnect the current link (wired first)
+qs ipc call brightness set <0-100>    # brightness (also supports step <±N>)
 ```
 
 With multiple monitors, panels open on the **focused screen**; lock / wallpaper / bt are global.
@@ -111,6 +113,7 @@ network control (currently in Chinese).
 | Network | Open nm-applet | Toggle Wi-Fi radio; disconnect or reconnect the Ethernet link; disconnect the current link from the speed readout |
 | Bluetooth | Open blueman-manager | Toggle Bluetooth power |
 | Volume | Open pavucontrol | Mute/unmute the default output |
+| Brightness | Open the brightness slider | — |
 | Light/dark / temperature etc. | Toggle system light/dark mode / open `top` in a terminal | — |
 | Idle inhibitor | Toggle “inhibit now” | Lock immediately |
 | Gear / reboot prompt | Settings panel / show reboot reasons | — / re-check immediately |

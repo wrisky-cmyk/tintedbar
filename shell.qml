@@ -16,6 +16,10 @@ import "components"
 ShellRoot {
     id: qsRoot
 
+    readonly property alias rootRef: qsRoot
+    readonly property alias weatherRef: weather
+    readonly property alias notifCenterRef: notifCenter
+
     property bool showTerminal: false
     property bool showBrowser: false
     property bool showFilemanager: false
@@ -38,12 +42,15 @@ ShellRoot {
     property int clipMaxEntries: 50
     property bool showNetSpeed: false
     property bool showClockSeconds: false
+    property bool clock24: true
 
     property bool showLunar: false
 
     property bool showWeather: false
 
     property bool showReboot: false
+
+    property bool showBrightness: false
     property int idleLockMinutes: 5
     property int idleDpmsMinutes: 10
 
@@ -61,13 +68,15 @@ ShellRoot {
 
     property var settingsByScreen: ({})
 
+    property var brightnessByScreen: ({})
+
     property var calendarByScreen: ({})
     property var weatherPopupByScreen: ({})
     property var trayRowByScreen: ({})
 
     function focusedScreenName() {
         if (Style.compositor === "niri")
-            return Style.niriFocusedOutput;
+            return Compositor.niriFocusedOutput;
         try {
             return Hyprland.focusedMonitor ? String(Hyprland.focusedMonitor.name) : "";
         } catch (e) {
@@ -103,13 +112,25 @@ ShellRoot {
             screen: qsRoot.polkitScreenKey,
             prompts: Object.keys(qsRoot.promptByScreen).map(k => {
                 const p = qsRoot.promptByScreen[k];
-                return p ? (k + ": active=" + p.active + " shown=" + p.shown + " mapped=" + p.visible + " size=" + Math.round(p.width) + "x" + Math.round(p.height)) : (k + ": <失效>");
+                return p ? (k + ": active=" + p.active + " shown=" + p.shown + " mapped=" + p.visible + " size=" + Math.round(p.width) + "x" + Math.round(p.height)) : (k + ": <gone>");
             })
         });
     }
 
     function panelForFocused(map) {
         return map[qsRoot.focusedScreenName()] || Object.values(map)[0] || null;
+    }
+
+    function brightnessIpcState() {
+        const m = panelForFocused(brightnessByScreen);
+        return m ? JSON.stringify({
+            backend: m.backend,
+            shown: m.shown,
+            percent: m.pct,
+            preview: m.preview
+        }) : JSON.stringify({
+            error: "focused screen has no bar"
+        });
     }
 
     readonly property var barFlagList: [
@@ -136,6 +157,11 @@ ShellRoot {
         {
             key: "showLunar",
             labelKey: "flag.showLunar",
+            group: "display"
+        },
+        {
+            key: "clock24",
+            labelKey: "flag.clock24",
             group: "display"
         },
         {
@@ -211,6 +237,11 @@ ShellRoot {
         {
             key: "showReboot",
             labelKey: "flag.showReboot",
+            group: "module"
+        },
+        {
+            key: "showBrightness",
+            labelKey: "flag.showBrightness",
             group: "module"
         },
         {
@@ -412,19 +443,31 @@ ShellRoot {
                 try {
                     saved = JSON.parse(text);
                 } catch (e) {}
+                if (!saved || typeof saved !== "object" || Array.isArray(saved))
+                    saved = {};
+
+                const num = v => {
+                    const n = Number(v);
+                    return isFinite(n) ? n : null;
+                };
                 for (const k of qsRoot.showFlags)
                     if (saved[k] !== undefined)
                         qsRoot[k] = saved[k] === true;
-                if (saved.barHeight !== undefined)
-                    Style.barHeight = Math.max(24, Math.min(48, saved.barHeight));
-                if (saved.historyLimit !== undefined)
-                    notifCenter.historyLimit = Math.max(5, Math.min(50, saved.historyLimit));
-                if (saved.clipMaxEntries !== undefined)
-                    qsRoot.clipMaxEntries = Math.max(10, Math.min(200, saved.clipMaxEntries));
-                if (saved.idleLockMinutes !== undefined)
-                    qsRoot.idleLockMinutes = Math.max(0, Math.min(60, saved.idleLockMinutes));
-                if (saved.idleDpmsMinutes !== undefined)
-                    qsRoot.idleDpmsMinutes = Math.max(0, Math.min(60, saved.idleDpmsMinutes));
+                const bh = num(saved.barHeight);
+                if (bh !== null)
+                    Style.barHeight = Math.max(24, Math.min(48, bh));
+                const hl = num(saved.historyLimit);
+                if (hl !== null)
+                    notifCenter.historyLimit = Math.max(5, Math.min(50, hl));
+                const cm = num(saved.clipMaxEntries);
+                if (cm !== null)
+                    qsRoot.clipMaxEntries = Math.max(10, Math.min(200, cm));
+                const il = num(saved.idleLockMinutes);
+                if (il !== null)
+                    qsRoot.idleLockMinutes = Math.max(0, Math.min(60, il));
+                const idm = num(saved.idleDpmsMinutes);
+                if (idm !== null)
+                    qsRoot.idleDpmsMinutes = Math.max(0, Math.min(60, idm));
                 if (saved.idleInhibited !== undefined)
                     qsRoot.idleInhibited = saved.idleInhibited === true;
 
@@ -455,8 +498,10 @@ ShellRoot {
 
     property bool barSettingsLoaded: false
     function settleHistoryLimit() {
-        if (qsRoot.barSettingsLoaded && notifCenter.historyLoaded)
+        if (qsRoot.barSettingsLoaded && notifCenter.historyLoaded) {
+            notifCenter.historySettled = true;
             notifCenter.applyHistoryLimit();
+        }
     }
     Connections {
         target: notifCenter
@@ -696,7 +741,7 @@ ShellRoot {
     function btToggle(how) {
         const want = !Style.btOn;
         const via = Style.btSetEnabled(want);
-        console.log("[BT] " + how + " 切蓝牙 → " + (want ? "开" : "关") + "(走 " + via + ")");
+        console.log("[BT] " + how + " toggle bt → " + (want ? "on" : "off") + "(via " + via + ")");
         return JSON.stringify({
             enabled: want,
             via: via
@@ -718,13 +763,13 @@ ShellRoot {
         const sink = Pipewire.defaultAudioSink;
         const audio = (sink && sink.audio) ? sink.audio : null;
         if (!audio) {
-            console.log("[VOL] " + how + " 切静音: 还没有默认输出, 空动作");
+            console.log("[VOL] " + how + " toggle mute: no default output yet, no-op");
             return JSON.stringify({
                 muted: null
             });
         }
         audio.muted = !audio.muted;
-        console.log("[VOL] " + how + " 切静音 → " + (audio.muted ? "静音" : "取消静音"));
+        console.log("[VOL] " + how + " toggle mute → " + (audio.muted ? "muted" : "unmuted"));
         return JSON.stringify({
             muted: audio.muted
         });
@@ -746,20 +791,51 @@ ShellRoot {
             return qsRoot.audioToggleMute("ipc");
         }
     }
+    IpcHandler {
+        target: "brightness"
+
+        function state(): string {
+            return qsRoot.brightnessIpcState();
+        }
+
+        function set(p: int): string {
+            const m = qsRoot.panelForFocused(qsRoot.brightnessByScreen);
+            if (m)
+                m.setPct(p, "ipc");
+            return qsRoot.brightnessIpcState();
+        }
+        function step(d: int): string {
+            const m = qsRoot.panelForFocused(qsRoot.brightnessByScreen);
+            if (m)
+                m.stepPct(d, "ipc");
+            return qsRoot.brightnessIpcState();
+        }
+
+        function preview(on: int): string {
+            const m = qsRoot.panelForFocused(qsRoot.brightnessByScreen);
+            if (m) {
+                m.preview = on !== 0;
+                if (m.preview && m.pct < 0)
+                    m.pct = 42;
+                console.log("[BRIGHT] preview " + (m.preview ? "on" : "off"));
+            }
+            return qsRoot.brightnessIpcState();
+        }
+    }
 
     function netToggle(how) {
         const r = Style.netToggleLink();
-        console.log("[NET] " + how + " 断/接网络(兜底) → " + r);
+        console.log("[NET] " + how + " net disconnect/reconnect(fallback) → " + r);
         return r;
     }
     function netToggleWifi(how) {
         const r = Style.netToggleWifiLink();
-        console.log("[NET] " + how + " 无线那格 → " + r);
+        console.log("[NET] " + how + " wifi cell → " + r);
         return r;
     }
     function netToggleWired(how) {
         const r = Style.netToggleWiredLink();
-        console.log("[NET] " + how + " 有线那格 → " + r);
+        console.log("[NET] " + how + " wired cell → " + r);
         return r;
     }
     IpcHandler {
@@ -847,12 +923,12 @@ ShellRoot {
 
     function notifyReboot(how) {
         if (!rebootNeeded.needs) {
-            console.log("[REBOOT] " + how + ": 现在不需要重启/重登, 不发通知");
+            console.log("[REBOOT] " + how + ": no reboot/relogin needed now, no notification");
             return;
         }
 
         const notice = qsRoot.rebootNotice(rebootNeeded.newerKernel.length, rebootNeeded.newerModules.length, rebootNeeded.staleLibs.length, rebootNeeded.noticeDetail);
-        console.log("[REBOOT] " + how + " 通知: 内核 " + rebootNeeded.newerKernel.length + " / 模块 " + rebootNeeded.newerModules.length + " / 用户态库 " + rebootNeeded.staleLibs.length);
+        console.log("[REBOOT] " + how + " notify: kernel " + rebootNeeded.newerKernel.length + " / modules " + rebootNeeded.newerModules.length + " / userland libs " + rebootNeeded.staleLibs.length);
 
         const action = qsRoot.rebootAction(rebootNeeded.newerKernel.length, rebootNeeded.newerModules.length);
         const shellCmd = "k=$(notify-send -a quickshell -u normal -i " + action.icon + " -h string:x-quickshell-reboot:1" + " -A " + action.id + "=\"$QS_RB_ACTION\" \"$QS_RB_TITLE\" \"$QS_RB_BODY\"); " + "[ \"$k\" = " + action.id + " ] && " + action.command + "; true";
@@ -885,7 +961,7 @@ ShellRoot {
 
         function check(): string {
             rebootNeeded.kick();
-            return "已触发重查(sh 异步), 1 秒后看 reboot state";
+            return "recheck triggered (sh async), see reboot state in 1s";
         }
 
         function notify(): string {
@@ -940,13 +1016,13 @@ ShellRoot {
     Connections {
         target: polkitAgent
         function onIsRegisteredChanged() {
-            console.log("[POLKIT] agent 注册 " + (polkitAgent.isRegistered ? "成功" : "失败 —— 可能已被别的 agent 占用(hyprpolkitagent?)"));
+            console.log("[POLKIT] agent registered " + (polkitAgent.isRegistered ? "ok" : "failed —— may be taken by another agent (hyprpolkitagent?)"));
         }
 
         function onFlowChanged() {
             qsRoot.polkitScreenKey = polkitAgent.flow ? qsRoot.focusedScreenName() : "";
             if (polkitAgent.flow)
-                console.log("[POLKIT] 收到授权请求: " + String(polkitAgent.flow.message) + " / " + String(polkitAgent.flow.actionId));
+                console.log("[POLKIT] received auth request: " + String(polkitAgent.flow.message) + " / " + String(polkitAgent.flow.actionId));
         }
     }
 
@@ -971,7 +1047,7 @@ ShellRoot {
     }
 
     Binding {
-        target: Style
+        target: Compositor
         property: "fullscreenWatch"
         value: qsRoot.fullscreenDnd || qsRoot.fullscreenIdleInhibit
     }
@@ -986,16 +1062,26 @@ ShellRoot {
 
             property string screenKey: ""
 
+            readonly property alias panelRef: panel
+            readonly property alias weatherModuleRef: weatherModule
+            readonly property alias clockModuleRef: clockModule
+            readonly property alias calendarPopupRef: calendarPopup
+            readonly property alias brightnessModuleRef: brightnessModule
+            readonly property alias brightnessPopupRef: brightnessPopup
+            readonly property alias wifiModuleRef: wifiModule
+            readonly property alias wiredModuleRef: wiredModule
+
             Component.onCompleted: {
                 screenRoot.screenKey = modelData ? String(modelData.name) : "";
                 qsRoot.launcherByScreen[screenRoot.screenKey] = appLauncher;
                 qsRoot.clipsByScreen[screenRoot.screenKey] = clipPicker;
                 qsRoot.powerMenuByScreen[screenRoot.screenKey] = powerMenu;
+                qsRoot.brightnessByScreen[screenRoot.screenKey] = brightnessModule;
                 qsRoot.promptByScreen[screenRoot.screenKey] = polkitPrompt;
                 qsRoot.settingsByScreen[screenRoot.screenKey] = settingsPanel;
                 qsRoot.calendarByScreen[screenRoot.screenKey] = calendarPopup;
                 qsRoot.weatherPopupByScreen[screenRoot.screenKey] = weatherPopup;
-                qsRoot.trayRowByScreen[screenRoot.screenKey] = trayRow;
+                qsRoot.trayRowByScreen[screenRoot.screenKey] = trayModule.trayRowItem;
             }
             Component.onDestruction: {
                 delete qsRoot.launcherByScreen[screenRoot.screenKey];
@@ -1006,6 +1092,7 @@ ShellRoot {
                 delete qsRoot.calendarByScreen[screenRoot.screenKey];
                 delete qsRoot.weatherPopupByScreen[screenRoot.screenKey];
                 delete qsRoot.trayRowByScreen[screenRoot.screenKey];
+                delete qsRoot.brightnessByScreen[screenRoot.screenKey];
             }
 
             PanelWindow {
@@ -1024,7 +1111,7 @@ ShellRoot {
                 color: Style.bg
 
                 IdleInhibitor {
-                    enabled: qsRoot.fullscreenIdleInhibit && Style.fullscreenActive
+                    enabled: qsRoot.fullscreenIdleInhibit && Compositor.fullscreenActive
                     window: panel
                 }
 
@@ -1134,7 +1221,7 @@ ShellRoot {
                     Text {
                         id: titleText
 
-                        property string pendingTitle: Style.activeTitle
+                        property string pendingTitle: Compositor.activeTitle
                         property string shownTitle: ""
                         onPendingTitleChanged: {
                             if (Style.debug)
@@ -1180,153 +1267,12 @@ ShellRoot {
                         padH: 3
                         marginRight: 3
                         glyphYOffset: 1
-                        onClicked: Style.closeWindow()
+                        onClicked: Compositor.closeWindow()
                     }
 
-                    Module {
+                    MprisModule {
                         id: mprisModule
-                        shown: qsRoot.showMpris && mprisModule.player !== null
-                        bgColor: "transparent"
-                        radius: 5
-                        padLeft: 7
-                        padRight: 2
-                        marginRight: 2
-
-                        contentYOffset: -1
-
-                        contentWidth: mprisViewport.width
-
-                        readonly property var player: {
-                            const ps = Style.modelValues(Mpris.players);
-                            for (const p of ps)
-                                if (p.playbackState === MprisPlaybackState.Playing)
-                                    return p;
-
-                            for (const p of ps)
-                                if (p.canTogglePlaying === true || p.canPlay === true)
-                                    return p;
-                            return ps.length ? ps[0] : null;
-                        }
-
-                        Item {
-                            id: mprisViewport
-
-                            x: (parent.width - width) / 2
-                            y: (parent.height - height) / 2
-                            width: Math.min(mprisText.implicitWidth, 260)
-                            height: mprisText.implicitHeight
-                            clip: true
-
-                            readonly property real overflow: Math.max(0, mprisText.implicitWidth - width)
-
-                            Text {
-                                id: mprisText
-
-                                textFormat: Text.RichText
-                                color: Style.text1
-                                font.family: Style.cjk
-
-                                font.pixelSize: 14
-                                text: {
-                                    const p = mprisModule.player;
-                                    if (!p)
-                                        return "";
-                                    const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                                    const artist = String(p.trackArtists || "");
-                                    const album = String(p.trackAlbum || "");
-
-                                    const icon = '<span style="font-size:18px">' + (p.playbackState !== MprisPlaybackState.Playing ? "\uf04c" : "\uf04b") + '</span>';
-
-                                    const dim = '<font color="' + Style.text3 + '">';
-                                    const close = "</font>";
-                                    const title = esc(p.trackTitle);
-                                    let segs = [];
-                                    if (artist)
-                                        segs.push(dim + esc(artist) + close);
-                                    if (album)
-                                        segs.push(dim + esc(album) + close);
-                                    if (title)
-                                        segs.push(title);
-                                    return icon + " " + segs.join(" - ");
-                                }
-
-                                onTextChanged: Qt.callLater(function () {
-                                    if (mprisModule.visible && mprisViewport.overflow > 0)
-                                        marquee.restart();
-                                })
-                            }
-
-                            SequentialAnimation {
-                                id: marquee
-                                running: mprisModule.visible && mprisViewport.overflow > 0
-                                loops: Animation.Infinite
-
-                                onRunningChanged: if (!marquee.running)
-                                    mprisText.x = 0
-                                PauseAnimation {
-                                    duration: 1600
-                                }
-                                NumberAnimation {
-                                    target: mprisText
-                                    property: "x"
-                                    to: -mprisViewport.overflow
-                                    duration: Math.max(1800, mprisViewport.overflow * 22)
-                                    easing.type: Easing.InOutSine
-                                }
-                                PauseAnimation {
-                                    duration: 1600
-                                }
-                                NumberAnimation {
-                                    target: mprisText
-                                    property: "x"
-                                    to: 0
-                                    duration: Math.max(1800, mprisViewport.overflow * 22)
-                                    easing.type: Easing.InOutSine
-                                }
-                            }
-                        }
-
-                        onClicked: {
-                            const p = mprisModule.player;
-                            if (!p)
-                                return;
-                            if (typeof p.togglePlaying === "function" && p.canTogglePlaying !== false) {
-                                p.togglePlaying();
-                            } else if (p.playbackState === MprisPlaybackState.Playing && p.canPause) {
-                                p.pause();
-                            } else if (p.canPlay) {
-                                p.play();
-                            }
-                        }
-
-                        onRightClicked: {
-                            const p = mprisModule.player;
-                            if (!p)
-                                return;
-                            if (typeof p.next === "function" && p.canGoNext !== false)
-                                p.next();
-                        }
-
-                        property bool testToggled: false
-                        onPlayerChanged: {
-                            if (Style.debug)
-                                console.log("[MPRISW] player:", player ? String(player.identity) : "null", "| textIW:", mprisText.implicitWidth, "| vpW:", mprisViewport.width);
-                            if (!Style.debug || !mprisModule.player || mprisModule.testToggled)
-                                return;
-                            mprisModule.testToggled = true;
-                            mprisTestTimer.restart();
-                        }
-                        Timer {
-                            id: mprisTestTimer
-                            interval: 2000
-                            onTriggered: {
-                                if (!Style.debug || !mprisModule.player)
-                                    return;
-                                const p = mprisModule.player;
-                                console.log("[MPRIS-TEST] player:", String(p.identity), "| togglePlaying:", typeof p.togglePlaying, "| canTogglePlaying:", String(p.canTogglePlaying), "| canPause:", String(p.canPause), "| canPlay:", String(p.canPlay), "| state:", String(p.playbackState));
-                                mprisModule.clicked();
-                            }
-                        }
+                        qsRoot: rootRef
                     }
 
                     BarButton {
@@ -1518,284 +1464,27 @@ ShellRoot {
                         onClicked: weatherPopup.toggle()
                     }
 
-                    Module {
+                    WifiModule {
                         id: wifiModule
-                        shown: wifiModule.wifiPresent
-                        bgColor: "transparent"
-                        radius: 5
-                        padLeft: 3
-                        padRight: 0
-                        marginRight: 5
-                        contentYOffset: 1
-                        contentWidth: wifiRow.implicitWidth
-
-                        readonly property var wifi: Style.connectedWifi()
-
-                        readonly property bool wifiPresent: Style.wifiDevice() !== null
-
-                        Row {
-                            id: wifiRow
-                            anchors.centerIn: parent
-                            spacing: 5
-
-                            Canvas {
-                                id: wifiCanvas
-
-                                visible: wifiModule.wifi !== null
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 18
-                                height: 18
-                                antialiasing: true
-                                contextType: "2d"
-
-                                property color ink: Style.text2
-                                onInkChanged: requestPaint()
-
-                                property int tier: {
-                                    if (!wifiModule.wifi)
-                                        return 0;
-                                    let s = Number(wifiModule.wifi.signalStrength) || 0;
-                                    if (s < 1)
-                                        s *= 100;
-                                    return s >= 75 ? 3 : s >= 50 ? 2 : s >= 25 ? 1 : 0;
-                                }
-
-                                onVisibleChanged: requestPaint()
-                                onTierChanged: requestPaint()
-                                onPaint: {
-                                    const ctx = getContext("2d");
-                                    ctx.reset();
-                                    ctx.strokeStyle = ink;
-                                    ctx.fillStyle = ink;
-                                    ctx.lineWidth = 2;
-                                    const cx = 9, cy = 14.4;
-                                    const a0 = -Math.PI * 3 / 4, a1 = -Math.PI / 4;
-
-                                    ctx.beginPath();
-                                    ctx.arc(cx, cy, 1.5, 0, Math.PI * 2);
-                                    ctx.fill();
-                                    const radii = [4.3, 7.9, 11.5];
-                                    for (let i = 0; i < 3; i++) {
-                                        ctx.globalAlpha = i < tier ? 1 : 0.35;
-                                        ctx.beginPath();
-                                        ctx.arc(cx, cy, radii[i], a0, a1);
-                                        ctx.stroke();
-                                    }
-                                    ctx.globalAlpha = 1;
-                                }
-                            }
-
-                            Text {
-                                id: wifiOffGlyph
-                                visible: wifiModule.wifi === null
-                                color: Style.text3
-                                font.family: Style.nerd
-                                font.pixelSize: 18
-                                text: "\u{F05AA}"
-                            }
-
-                            Text {
-                                id: wifiNameText
-                                visible: qsRoot.showNetIface && wifiModule.wifi !== null
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: Style.text2
-                                font.family: Style.nerd
-                                font.pixelSize: 14
-                                width: Math.min(implicitWidth, 160)
-                                elide: Text.ElideRight
-                                text: wifiModule.wifi ? wifiModule.wifi.name : ""
-                            }
-                        }
-
-                        onClicked: Quickshell.execDetached(["nm-applet"])
-
-                        onRightClicked: qsRoot.netToggleWifi("右键")
+                        qsRoot: rootRef
                     }
 
-                    Module {
+                    WiredModule {
                         id: wiredModule
-
-                        readonly property bool hasLink: {
-                            const d = Style.wiredDevice();
-                            return d ? !!d.hasLink : false;
-                        }
-                        shown: wiredModule.wiredPresent && (wiredModule.hasLink || !wifiModule.wifiPresent)
-                        bgColor: "transparent"
-                        radius: 5
-                        padLeft: 0
-                        padRight: 0
-                        marginRight: 5
-                        contentYOffset: 1
-                        contentWidth: wiredRow.implicitWidth
-
-                        readonly property var wired: Style.connectedWired()
-
-                        readonly property bool wiredPresent: Style.wiredDevice() !== null
-
-                        Row {
-                            id: wiredRow
-                            anchors.centerIn: parent
-                            spacing: 5
-
-                            Text {
-                                id: wiredGlyph
-                                color: wiredModule.wired ? Style.text2 : Style.text3
-                                font.family: Style.nerd
-                                font.pixelSize: 18
-                                text: wiredModule.wired ? "\u{F0200}" : "\u{F0202}"
-                            }
-
-                            Text {
-                                id: wiredNameText
-                                visible: qsRoot.showNetIface && wiredModule.wired !== null
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: Style.text2
-                                font.family: Style.nerd
-                                font.pixelSize: 14
-                                text: wiredModule.wired ? wiredModule.wired.name : ""
-                            }
-                        }
-
-                        onClicked: Quickshell.execDetached(["nm-applet"])
-
-                        onRightClicked: qsRoot.netToggleWired("右键")
+                        qsRoot: rootRef
+                        wifiModule: wifiModuleRef
                     }
 
-                    Module {
+                    NoNetModule {
                         id: noNetModule
-                        shown: !wifiModule.wifiPresent && !wiredModule.wiredPresent
-                        bgColor: "transparent"
-                        radius: 5
-                        padLeft: 0
-                        padRight: 0
-                        marginRight: 5
-                        contentYOffset: 1
-                        contentWidth: noNetGlyph.implicitWidth
-
-                        Text {
-                            id: noNetGlyph
-                            anchors.centerIn: parent
-                            color: Style.text2
-                            font.family: Style.nerd
-                            font.pixelSize: 18
-
-                            text: "\u{F092E}"
-                        }
-
-                        onClicked: Quickshell.execDetached(["nm-applet"])
-
-                        onRightClicked: qsRoot.netToggle("右键")
+                        qsRoot: rootRef
+                        wifiModule: wifiModuleRef
+                        wiredModule: wiredModuleRef
                     }
 
-                    Module {
+                    NetSpeedModule {
                         id: netSpeedModule
-                        shown: qsRoot.showNetSpeed && (netSpeedModule.wifi !== null || netSpeedModule.wired !== null)
-                        bgColor: "transparent"
-                        radius: 5
-                        padLeft: 0
-                        padRight: 4
-                        contentYOffset: 1
-                        contentWidth: netSpeedMetrics.advanceWidth
-
-                        readonly property var wifi: Style.connectedWifi()
-                        readonly property var wired: Style.connectedWired()
-                        property real rxSpeed: 0
-                        property real txSpeed: 0
-                        property var lastBytes: null
-
-                        function fmtSpeed(v) {
-                            v = Math.max(0, v);
-                            let n, u;
-                            if (v >= 1073741824) {
-                                n = v / 1073741824;
-                                u = "G";
-                            } else if (v >= 1048576) {
-                                n = v / 1048576;
-                                u = "M";
-                            } else if (v >= 1024) {
-                                n = v / 1024;
-                                u = "K";
-                            } else {
-                                n = v;
-                                u = "B";
-                            }
-                            n = Math.min(999, Math.round(n));
-                            return ("00" + n).slice(-3) + u;
-                        }
-
-                        function refreshSpeed(text) {
-                            let rx = 0, tx = 0, seen = 0;
-                            for (const l of String(text).split("\n").slice(2)) {
-                                const f = l.trim().split(/[:\s]+/);
-                                if (f.length < 10 || f[0] === "" || f[0] === "lo")
-                                    continue;
-                                rx += +f[1] || 0;
-                                tx += +f[9] || 0;
-                                seen++;
-                            }
-
-                            if (seen === 0)
-                                return;
-                            const now = Date.now();
-                            if (lastBytes) {
-                                const dt = (now - lastBytes.t) / 1000;
-                                if (dt > 0) {
-                                    rxSpeed = Math.max(0, (rx - lastBytes.rx) / dt);
-                                    txSpeed = Math.max(0, (tx - lastBytes.tx) / dt);
-                                }
-                            }
-                            lastBytes = {
-                                rx: rx,
-                                tx: tx,
-                                t: now
-                            };
-                        }
-
-                        FileView {
-                            id: netFile
-                            path: "/proc/net/dev"
-                            blockLoading: true
-                            printErrors: false
-                        }
-
-                        Timer {
-                            interval: 1000
-                            repeat: true
-                            running: true
-                            triggeredOnStart: true
-                            onTriggered: {
-                                if (!qsRoot.showNetSpeed)
-                                    return;
-
-                                if (netSpeedModule.wifi === null && netSpeedModule.wired === null)
-                                    return;
-                                netFile.reload();
-                                netSpeedModule.refreshSpeed(netFile.text());
-                            }
-                        }
-
-                        TextMetrics {
-                            id: netSpeedMetrics
-                            font.family: Style.nerd
-                            font.pixelSize: 14
-                            text: "↓000B ↑000B"
-                        }
-
-                        Text {
-                            id: netSpeedText
-                            anchors.centerIn: parent
-                            anchors.verticalCenterOffset: 1
-
-                            width: netSpeedMetrics.advanceWidth
-                            horizontalAlignment: Text.AlignRight
-                            color: Style.text2
-                            font.family: Style.nerd
-                            font.pixelSize: 14
-                            text: "↓" + netSpeedModule.fmtSpeed(netSpeedModule.rxSpeed) + " ↑" + netSpeedModule.fmtSpeed(netSpeedModule.txSpeed)
-                        }
-
-                        onClicked: Quickshell.execDetached(["nm-applet"])
-                        onRightClicked: qsRoot.netToggle("右键")
+                        qsRoot: rootRef
                     }
 
                     Module {
@@ -1844,7 +1533,7 @@ ShellRoot {
 
                         onClicked: Quickshell.execDetached(["blueman-manager"])
 
-                        onRightClicked: qsRoot.btToggle("右键")
+                        onRightClicked: qsRoot.btToggle("right-click")
                     }
 
                     Module {
@@ -1885,80 +1574,10 @@ ShellRoot {
                         }
                     }
 
-                    Module {
+                    PrivacyModule {
                         id: privacyModule
-                        shown: qsRoot.showPrivacy && (privacyModule.micActive || privacyModule.shareActive)
-                        bgColor: "transparent"
-                        radius: 0
-
-                        padLeft: 3
-                        padRight: 3
-                        marginRight: 0
-                        contentYOffset: 1
-                        contentWidth: privacyRow.implicitWidth
-
-                        property bool micActive: false
-                        property bool shareActive: false
-
-                        function refreshPrivacy() {
-                            let mic = false, share = false;
-                            const nodes = Style.modelValues(Pipewire.nodes);
-                            for (const n of nodes) {
-                                if (!n)
-                                    continue;
-
-                                const t = Number(n.type);
-                                if ((t & 4) && (t & 1) && (t & 8))
-                                    mic = true;
-                                else if ((t & 4) && (t & 2))
-                                    share = true;
-                            }
-                            privacyModule.micActive = mic;
-                            privacyModule.shareActive = share;
-                            if (Style.debug) {
-                                console.log("[PRIVACY] nodes=" + nodes.length + " mic=" + mic + " share=" + share + " comp=" + Style.compositor + " title=" + JSON.stringify(Style.activeTitle));
-                            }
-                        }
-
-                        Connections {
-                            target: Pipewire.nodes
-
-                            enabled: qsRoot.showPrivacy
-                            function onValuesChanged() {
-                                privacyModule.refreshPrivacy();
-                            }
-                        }
-
-                        Timer {
-                            interval: 2000
-                            repeat: true
-                            running: qsRoot.showPrivacy
-                            triggeredOnStart: true
-                            onTriggered: privacyModule.refreshPrivacy()
-                        }
-
-                        Row {
-                            id: privacyRow
-
-                            x: (parent.width - width) / 2
-                            y: (parent.height - height) / 2
-                            spacing: 4
-
-                            Text {
-                                visible: privacyModule.micActive
-                                text: "\uF130"
-                                color: Style.privacyRed
-                                font.family: Style.nerd
-                                font.pixelSize: 18
-                            }
-                            Text {
-                                visible: privacyModule.shareActive
-                                text: "\uF108"
-                                color: Style.privacyOrange
-                                font.family: Style.nerd
-                                font.pixelSize: 18
-                            }
-                        }
+                        qsRoot: rootRef
+                        panel: panelRef
                     }
 
                     NotifyButton {
@@ -2002,7 +1621,7 @@ ShellRoot {
                         glyphYOffset: 1
 
                         textColor: Style.accent
-                        onClicked: qsRoot.notifyReboot("左键")
+                        onClicked: qsRoot.notifyReboot("left-click")
                         onRightClicked: rebootNeeded.kick()
                     }
 
@@ -2052,234 +1671,40 @@ ShellRoot {
                                     icon = "\uF026";
                                 else
                                     icon = volModule.audio.volume <= 0.34 ? "\uF027" : "\uF028";
-                                return icon + (btSink ? "\uF294" : "");
+
+                                return (btSink ? "\uF294" : "") + icon;
                             }
                         }
 
                         onClicked: Quickshell.execDetached(["pavucontrol"])
 
-                        onRightClicked: qsRoot.audioToggleMute("右键")
+                        onRightClicked: qsRoot.audioToggleMute("right-click")
                     }
 
-                    VolumeSlider {}
+                    VolumeSlider {
+                        qsRoot: rootRef
+                    }
 
-                    Module {
+                    BrightnessModule {
+                        id: brightnessModule
+                        qsRoot: rootRef
+                        brightnessPopup: brightnessPopupRef
+
+                        BrightnessPopup {
+                            id: brightnessPopup
+                            panel: panelRef
+                            brightnessModule: brightnessModuleRef
+                        }
+                    }
+
+                    BatteryModule {
                         id: batteryModule
-
-                        shown: qsRoot.showBattery && batteryModule.bat !== null
-
-                        bgColor: batteryModule.critical ? Style.danger : Style.bg
-                        opacityVal: batteryModule.critical ? (batteryModule.blinkOn ? 1.0 : 0.35) : 1.0
-                        radius: 5
-                        padLeft: 6
-                        padRight: 0
-                        marginRight: 0
-                        contentYOffset: 1
-                        contentWidth: batRow.implicitWidth
-
-                        readonly property var bat: Style.laptopBattery()
-                        readonly property real level: batteryModule.bat ? batteryModule.bat.percentage : 0
-
-                        readonly property string pctText: batteryModule.bat ? String(Math.round(batteryModule.bat.percentage * 100)) : ""
-
-                        readonly property string tag: !batteryModule.bat ? "" : (batteryModule.bat.state === UPowerDeviceState.Charging ? "\uF0E7" : (!UPower.onBattery ? "\uF1E6" : ""))
-                        readonly property bool critical: batteryModule.bat !== null && batteryModule.bat.percentage <= 0.15 && batteryModule.bat.state !== UPowerDeviceState.Charging && UPower.onBattery
-                        property bool blinkOn: false
-
-                        Timer {
-                            interval: 500
-                            repeat: true
-                            running: batteryModule.critical
-                            onTriggered: batteryModule.blinkOn = !batteryModule.blinkOn
-                        }
-
-                        Row {
-                            id: batRow
-                            spacing: 1
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Rectangle {
-                                id: batBody
-                                width: 34
-                                height: 16
-                                radius: 3
-                                color: "transparent"
-                                border.width: 1.5
-                                border.color: batteryModule.critical ? Style.danger : Style.text2
-
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 2
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: Math.max(0, Math.round((batBody.width - 4) * batteryModule.level))
-                                    height: batBody.height - 5
-                                    radius: 1
-                                    color: batteryModule.critical ? Style.danger : Style.accent
-                                    opacity: 0.45
-                                }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: batteryModule.pctText
-                                    color: batteryModule.critical ? Style.text3 : Style.text1
-                                    font.family: Style.nerd
-                                    font.pixelSize: 11
-                                }
-                            }
-
-                            Rectangle {
-                                width: 2.5
-                                height: 7
-                                radius: 1
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: batteryModule.critical ? Style.danger : Style.text2
-                            }
-
-                            Text {
-                                visible: batteryModule.tag !== ""
-                                text: batteryModule.tag
-                                color: batteryModule.critical ? Style.danger : Style.text2
-                                font.family: Style.nerd
-                                font.pixelSize: 13
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
+                        qsRoot: rootRef
                     }
 
-                    Item {
+                    TrayModule {
                         id: trayModule
-
-                        readonly property int padLeft: 6
-                        implicitHeight: Style.barContentHeight
-
-                        implicitWidth: trayRow.implicitWidth + trayModule.padLeft + 5
-
-                        Row {
-                            id: trayRow
-                            x: trayModule.padLeft
-
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 10
-
-                            property string lastMenuId: ""
-
-                            function openMenu(which) {
-                                for (let i = 0; i < trayRow.children.length; i++) {
-                                    const c = trayRow.children[i];
-                                    if (!c || !c.modelData || !c.modelData.hasMenu)
-                                        continue;
-                                    if (which && String(c.modelData.id) !== String(which))
-                                        continue;
-                                    trayRow.lastMenuId = String(c.modelData.id);
-                                    const pos = c.mapToItem(panel.contentItem, 0, 0);
-                                    c.modelData.display(panel, Math.round(pos.x), Math.round(pos.y) + Style.barHeight);
-                                    return true;
-                                }
-                                return false;
-                            }
-
-                            function openNextMenu() {
-                                const cands = [];
-                                for (let i = 0; i < trayRow.children.length; i++) {
-                                    const c = trayRow.children[i];
-                                    if (c && c.modelData && c.modelData.hasMenu)
-                                        cands.push(c);
-                                }
-                                if (cands.length === 0)
-                                    return false;
-                                let idx = 0;
-                                for (let i = 0; i < cands.length; i++)
-                                    if (String(cands[i].modelData.id) === trayRow.lastMenuId)
-                                        idx = (i + 1) % cands.length;
-                                return trayRow.openMenu(cands[idx].modelData.id);
-                            }
-
-                            function listItems() {
-                                const out = [];
-                                for (let i = 0; i < trayRow.children.length; i++) {
-                                    const c = trayRow.children[i];
-                                    if (!c || !c.modelData)
-                                        continue;
-                                    out.push({
-                                        id: String(c.modelData.id),
-                                        hasMenu: !!c.modelData.hasMenu,
-                                        title: String(c.modelData.title)
-                                    });
-                                }
-                                return JSON.stringify(out);
-                            }
-
-                            Repeater {
-                                model: SystemTray.items
-
-                                delegate: Item {
-                                    id: trayItem
-                                    implicitWidth: 11
-                                    implicitHeight: 18
-
-                                    property int reloadTries: 0
-
-                                    required property var modelData
-
-                                    IconImage {
-                                        id: trayImg
-                                        anchors.centerIn: parent
-                                        width: 18
-                                        height: 18
-                                        source: trayF.source
-
-                                        onStatusChanged: {
-                                            if (status === Image.Error && trayItem.reloadTries < 3) {
-                                                reloadTimer.restart();
-                                            } else if (status === Image.Ready) {
-                                                trayItem.reloadTries = 0;
-                                            }
-                                        }
-                                    }
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        visible: trayF.source === "" || trayImg.status === Image.Error
-                                        text: "●"
-                                        color: Style.text3
-                                        font.family: Style.cjk
-                                        font.pixelSize: 10
-                                    }
-
-                                    FileIcon {
-                                        id: trayF
-                                        iconName: modelData.icon
-                                        onIconNameChanged: trayItem.reloadTries = 0
-                                    }
-
-                                    Timer {
-                                        id: reloadTimer
-                                        interval: 800
-                                        onTriggered: {
-                                            if (trayItem.reloadTries >= 3)
-                                                return;
-                                            trayItem.reloadTries++;
-                                            trayF.restart();
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: mouse => {
-                                            if (mouse.button === Qt.RightButton && modelData.hasMenu) {
-                                                const pos = trayItem.mapToItem(panel.contentItem, 0, 0);
-
-                                                modelData.display(panel, Math.round(pos.x), Math.round(pos.y) + Style.barHeight);
-                                            } else {
-                                                modelData.activate();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        panel: panelRef
                     }
 
                     BarButton {
@@ -2294,76 +1719,9 @@ ShellRoot {
                         onClicked: powerMenu.open()
                     }
 
-                    Module {
+                    KeyboardModule {
                         id: kbModule
-                        shown: qsRoot.showKeyboard && (kbModule.num || kbModule.caps)
-                        bgColor: "transparent"
-                        radius: 0
-                        padLeft: 3
-                        padRight: 1
-                        marginRight: 0
-                        contentYOffset: 1
-                        contentWidth: kbRow.implicitWidth
-
-                        property bool num: false
-                        property bool caps: false
-
-                        Poller {
-                            active: qsRoot.showKeyboard
-                            interval: 3000
-                            command: ["sh", "-c", "n=0; c=0; s=; for k in numlock capslock; do v=; " + "for f in /sys/class/leds/*::$k/brightness; do " + "[ -e \"$f\" ] || break; read -r v < \"$f\"; break; done; " + "[ -n \"$v\" ] && s=1; " + "case $k in numlock) n=${v:-0};; capslock) c=${v:-0};; esac; done; " + "if [ -n \"$s\" ]; then printf 'led %s %s\\n' \"$n\" \"$c\"; " + (Style.compositor === "niri" ? "else printf 'led 0 0\\n'; fi" : "else exec hyprctl devices -j; fi")]
-                            onOutput: text => {
-                                const t = String(text).trim();
-
-                                if (t.indexOf("led ") === 0) {
-                                    const p = t.split(/\s+/);
-                                    kbModule.num = p[1] === "1";
-                                    kbModule.caps = p[2] === "1";
-                                    return;
-                                }
-
-                                try {
-                                    const d = JSON.parse(t);
-                                    let num = false, caps = false;
-                                    for (const k of (d.keyboards || [])) {
-                                        if (k.numLock === true)
-                                            num = true;
-                                        if (k.capsLock === true)
-                                            caps = true;
-                                    }
-                                    kbModule.num = num;
-                                    kbModule.caps = caps;
-                                } catch (e) {}
-                            }
-                        }
-
-                        Row {
-                            id: kbRow
-
-                            x: (parent.width - width) / 2
-                            y: (parent.height - height) / 2
-                            spacing: 3
-
-                            Text {
-                                visible: kbModule.num
-
-                                text: "\u{F03A6}"
-                                color: Style.text1
-                                font.family: Style.nerd
-                                font.pixelSize: 19
-
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Text {
-                                visible: kbModule.caps
-
-                                text: "\u{F0A9B}"
-                                color: Style.text1
-                                font.family: Style.nerd
-                                font.pixelSize: 17
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                        }
+                        qsRoot: rootRef
                     }
 
                     Module {
@@ -2378,7 +1736,7 @@ ShellRoot {
                         contentYOffset: 1
                         contentWidth: langText.implicitWidth
 
-                        readonly property string shortName: Style.layoutShort()
+                        readonly property string shortName: Compositor.layoutShort()
 
                         Text {
                             id: langText
@@ -2392,609 +1750,27 @@ ShellRoot {
                         }
                     }
 
-                    Module {
+                    ClockModule {
                         id: clockModule
-                        bgColor: "transparent"
-                        radius: 4
-                        padLeft: 5
-                        padRight: 5
-                        marginRight: 5
-                        contentYOffset: 1
-
-                        readonly property int clockPx: 16
-
-                        readonly property int clockGap: 6
-
-                        contentWidth: clockModule.alt ? clockWdMetrics.advanceWidth + clockDayMetrics.advanceWidth + clockTimeMetrics.advanceWidth + 2 * clockModule.clockGap : clockText.implicitWidth
-
-                        property bool alt: false
-
-                        property string clockStr: Style.timeStr(qsRoot.showClockSeconds)
-
-                        readonly property var altParts: clockModule.alt ? (function () {
-                                const tick = clockModule.clockStr;
-                                return I18n.dateParts(qsRoot.showClockSeconds);
-                            })() : {
-                            wd: "",
-                            day: "",
-                            time: ""
-                        }
-
-                        TextMetrics {
-                            id: clockWdMetrics
-                            font.family: Style.nerd
-                            font.pixelSize: clockModule.clockPx
-                            text: I18n.dateSampleParts(qsRoot.showClockSeconds).wd
-                        }
-                        TextMetrics {
-                            id: clockDayMetrics
-                            font.family: Style.nerd
-                            font.pixelSize: clockModule.clockPx
-                            text: I18n.dateSampleParts(qsRoot.showClockSeconds).day
-                        }
-                        TextMetrics {
-                            id: clockTimeMetrics
-                            font.family: Style.nerd
-                            font.pixelSize: clockModule.clockPx
-
-                            text: I18n.dateSampleParts(qsRoot.showClockSeconds).time
-                        }
-
-                        Text {
-                            id: clockText
-                            anchors.centerIn: parent
-                            visible: !clockModule.alt
-                            text: clockModule.clockStr
-                            color: Style.text2
-                            font.family: Style.nerd
-                            font.pixelSize: clockModule.clockPx
-                        }
-
-                        Row {
-                            id: clockAltRow
-                            anchors.centerIn: parent
-                            visible: clockModule.alt
-                            spacing: clockModule.clockGap
-
-                            Text {
-                                id: clockAltWd
-                                text: clockModule.altParts.wd
-                                color: Style.text2
-                                font.family: Style.nerd
-                                font.pixelSize: clockModule.clockPx
-                            }
-                            Text {
-                                text: clockModule.altParts.day
-                                color: Style.text2
-                                font.family: Style.nerd
-                                font.pixelSize: clockModule.clockPx
-                                anchors.baseline: clockAltWd.baseline
-                            }
-                            Text {
-                                text: clockModule.altParts.time
-                                color: Style.text2
-                                font.family: Style.nerd
-                                font.pixelSize: clockModule.clockPx
-                                anchors.baseline: clockAltWd.baseline
-                            }
-                        }
-
-                        Timer {
-                            id: clockSecTick
-                            interval: 1000
-                            running: qsRoot.showClockSeconds
-                            repeat: true
-                            onTriggered: clockModule.clockStr = Style.timeStr(true)
-                        }
-                        Timer {
-                            id: clockMinTick
-                            interval: 60000
-                            running: !qsRoot.showClockSeconds
-                            repeat: true
-                            triggeredOnStart: true
-                            onTriggered: {
-                                clockModule.clockStr = Style.timeStr(false);
-
-                                const d = new Date();
-                                clockMinTick.interval = 60000 - (d.getSeconds() * 1000 + d.getMilliseconds()) + 30;
-                                clockMinTick.restart();
-                            }
-                        }
-
-                        onClicked: calendarPopup.toggle()
-                        onRightClicked: clockModule.alt = !clockModule.alt
+                        qsRoot: rootRef
+                        calendarPopup: calendarPopupRef
                     }
                 }
             }
 
-            PopupWindow {
+            CalendarPopup {
                 id: calendarPopup
-
-                visible: false
-                color: "transparent"
-
-                function open() {
-                    const now = new Date();
-                    calendarPopup.viewYear = now.getFullYear();
-                    calendarPopup.viewMonth = now.getMonth();
-                    calendarPopup.visible = true;
-                }
-                function close() {
-                    calendarPopup.visible = false;
-                }
-                function toggle() {
-                    calendarPopup.visible ? calendarPopup.close() : calendarPopup.open();
-                }
-
-                function shiftMonth(d) {
-                    let m = calendarPopup.viewMonth + d;
-                    let y = calendarPopup.viewYear;
-                    while (m < 0) {
-                        m += 12;
-                        y--;
-                    }
-                    while (m > 11) {
-                        m -= 12;
-                        y++;
-                    }
-                    calendarPopup.viewMonth = m;
-                    calendarPopup.viewYear = y;
-                }
-
-                implicitWidth: 350
-
-                implicitHeight: calCol.implicitHeight + 20 + Style.barHeight + 2 - Style.barInset
-                grabFocus: true
-
-                property int viewYear: new Date().getFullYear()
-                property int viewMonth: new Date().getMonth()
-
-                property bool showLunar: qsRoot.showLunar
-
-                readonly property real cellW: (calendarPopup.width - 20) / 7
-
-                readonly property int gridRows: Math.ceil((calendarPopup.firstOffset() + calendarPopup.daysInMonth()) / 7)
-
-                anchor.window: panel
-                anchor.item: clockModule
-                anchor.edges: Edges.Bottom
-                anchor.gravity: Edges.Top
-
-                function firstOffset() {
-                    const d = new Date(calendarPopup.viewYear, calendarPopup.viewMonth, 1);
-                    return (d.getDay() + 6) % 7;
-                }
-
-                function daysInMonth() {
-                    return new Date(calendarPopup.viewYear, calendarPopup.viewMonth + 1, 0).getDate();
-                }
-
-                function cellDay(i) {
-                    const day = i - calendarPopup.firstOffset() + 1;
-                    if (day < 1 || day > calendarPopup.daysInMonth())
-                        return 0;
-                    return day;
-                }
-
-                function cellDate(i) {
-                    const day = calendarPopup.cellDay(i);
-                    if (day === 0)
-                        return null;
-                    return new Date(calendarPopup.viewYear, calendarPopup.viewMonth, day);
-                }
-
-                function isToday(day) {
-                    const n = new Date();
-                    return day === n.getDate() && calendarPopup.viewYear === n.getFullYear() && calendarPopup.viewMonth === n.getMonth();
-                }
-
-                function isWeekend(i) {
-                    return (i % 7) >= 5;
-                }
-
-                Rectangle {
-                    id: calRect
-                    anchors.fill: parent
-
-                    anchors.topMargin: Style.barHeight + 2 - Style.barInset
-                    radius: 12
-                    color: Style.card
-                    border.width: 1
-                    border.color: Style.border
-
-                    focus: true
-                    Keys.onEscapePressed: calendarPopup.close()
-
-                    Keys.onLeftPressed: calendarPopup.shiftMonth(-1)
-                    Keys.onRightPressed: calendarPopup.shiftMonth(1)
-
-                    Column {
-                        id: calCol
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 6
-
-                        Item {
-                            width: parent.width
-                            height: 30
-
-                            Text {
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "‹"
-                                color: Style.text3
-                                font.family: Style.cjk
-                                font.pixelSize: 22
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: calendarPopup.shiftMonth(-1)
-                                }
-                            }
-
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: I18n.calendarTitle(calendarPopup.viewYear, calendarPopup.viewMonth)
-                                color: Style.text1
-                                font.family: Style.cjk
-                                font.pixelSize: 19
-                                font.weight: Font.Bold
-                            }
-
-                            Text {
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "›"
-                                color: Style.text3
-                                font.family: Style.cjk
-                                font.pixelSize: 22
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: calendarPopup.shiftMonth(1)
-                                }
-                            }
-                        }
-
-                        Row {
-                            width: parent.width
-                            spacing: 0
-
-                            Repeater {
-
-                                model: I18n.weekdayHeaders
-                                delegate: Text {
-                                    width: calendarPopup.cellW
-                                    height: 24
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    text: modelData
-                                    color: Style.accent
-                                    font.family: Style.cjk
-                                    font.pixelSize: 16
-                                }
-                            }
-                        }
-
-                        Grid {
-                            width: parent.width
-                            columns: 7
-                            spacing: 0
-
-                            Repeater {
-
-                                model: calendarPopup.gridRows * 7
-
-                                delegate: Item {
-                                    width: calendarPopup.cellW
-                                    height: 48
-                                    readonly property int dayNum: calendarPopup.cellDay(index)
-
-                                    readonly property var mark: calendarPopup.showLunar ? I18n.dayMark(calendarPopup.cellDate(index)) : {
-                                        text: "",
-                                        kind: ""
-                                    }
-
-                                    Rectangle {
-                                        visible: calendarPopup.isToday(parent.dayNum)
-                                        width: 26
-                                        height: 26
-                                        radius: 12
-                                        color: "transparent"
-                                        border.width: 1.5
-                                        border.color: Style.accent
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        anchors.verticalCenter: calDayText.verticalCenter
-                                    }
-
-                                    Text {
-                                        id: calDayText
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        anchors.top: parent.top
-                                        anchors.topMargin: 4
-                                        text: parent.dayNum || ""
-                                        visible: parent.dayNum !== 0
-                                        color: calendarPopup.isToday(parent.dayNum) ? Style.accent : (calendarPopup.isWeekend(index) ? Style.text3 : Style.text2)
-                                        font.family: Style.cjk
-                                        font.pixelSize: 16
-                                        font.weight: calendarPopup.isToday(parent.dayNum) ? Font.Bold : Font.Normal
-                                    }
-
-                                    Text {
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        anchors.top: calDayText.bottom
-                                        anchors.topMargin: 1
-                                        visible: text !== ""
-                                        text: (calendarPopup.showLunar && parent.dayNum !== 0) ? parent.mark.text : ""
-                                        color: parent.mark.kind === "lunar" ? Style.text3 : Style.accent
-                                        font.family: Style.cjk
-                                        font.pixelSize: 12
-                                    }
-                                }
-                            }
-                        }
-
-                        Item {
-                            id: almanacBlock
-                            width: parent.width
-                            readonly property var info: calendarPopup.showLunar ? I18n.almanacToday(new Date()) : null
-                            visible: info !== null
-                            height: info !== null ? almCol.implicitHeight : 0
-
-                            Column {
-                                id: almCol
-                                width: parent.width
-                                spacing: 5
-
-                                Rectangle {
-                                    width: parent.width
-                                    height: 1
-                                    color: Style.border
-                                    opacity: 0.4
-                                }
-
-                                Item {
-                                    width: parent.width
-                                    height: 30
-
-                                    Row {
-                                        id: almMoon
-                                        anchors.left: parent.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-
-                                        Text {
-                                            height: 30
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: Style.accent
-                                            font.family: Style.nerd
-                                            font.pixelSize: 26
-                                            text: almanacBlock.info ? almanacBlock.info.moonGlyph : ""
-                                        }
-                                        Text {
-                                            height: 30
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: Style.text3
-                                            font.family: Style.cjk
-                                            font.pixelSize: 12
-                                            text: almanacBlock.info ? almanacBlock.info.moon : ""
-                                        }
-                                    }
-
-                                    Row {
-                                        id: almTail
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-
-                                        Text {
-                                            height: 30
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: Style.text3
-                                            font.family: Style.cjk
-                                            font.pixelSize: 12
-                                            text: almanacBlock.info ? almanacBlock.info.gzDay : ""
-                                        }
-                                        Text {
-                                            height: 30
-                                            verticalAlignment: Text.AlignVCenter
-                                            color: Style.accent
-                                            font.family: Style.cjk
-                                            font.pixelSize: 12
-                                            text: almanacBlock.info ? almanacBlock.info.term : ""
-                                        }
-                                    }
-
-                                    Text {
-                                        anchors.left: almMoon.right
-                                        anchors.leftMargin: 12
-                                        anchors.right: almTail.left
-                                        anchors.rightMargin: 12
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        horizontalAlignment: Text.AlignHCenter
-                                        elide: Text.ElideRight
-                                        color: Style.text2
-                                        font.family: Style.cjk
-                                        font.pixelSize: 12
-                                        text: almanacBlock.info ? almanacBlock.info.lunar + " · " + almanacBlock.info.gzYear : ""
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                qsRoot: rootRef
+                panel: panelRef
+                clockModule: clockModuleRef
             }
 
-            PopupWindow {
+            WeatherPopup {
                 id: weatherPopup
-
-                visible: false
-                function open() {
-                    if (qsRoot.showWeather && weather.ready)
-                        weatherPopup.visible = true;
-                }
-                function close() {
-                    weatherPopup.visible = false;
-                }
-                function toggle() {
-                    weatherPopup.visible ? weatherPopup.close() : weatherPopup.open();
-                }
-
-                Connections {
-                    target: weather
-                    function onReadyChanged() {
-                        if (!weather.ready)
-                            weatherPopup.close();
-                    }
-                }
-
-                color: "transparent"
-
-                implicitWidth: 244
-
-                implicitHeight: wxCol.implicitHeight + 20 + Style.barHeight + 2 - Style.barInset
-                grabFocus: true
-
-                anchor.window: panel
-                anchor.item: weatherModule
-                anchor.edges: Edges.Bottom
-                anchor.gravity: Edges.Top
-
-                Rectangle {
-                    id: wxCard
-                    anchors.fill: parent
-
-                    anchors.topMargin: Style.barHeight + 2 - Style.barInset
-                    radius: 12
-                    color: Style.card
-                    border.width: 1
-                    border.color: Style.border
-                    focus: true
-                    Keys.onEscapePressed: weatherPopup.close()
-
-                    Column {
-                        id: wxCol
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 6
-
-                        Item {
-                            width: parent.width
-
-                            height: 40
-
-                            Text {
-                                id: wxNowGlyph
-                                anchors.left: parent.left
-                                anchors.top: parent.top
-                                color: Style.accent
-                                font.family: Style.nerd
-                                font.pixelSize: 30
-                                text: weather.current ? weather.glyph(weather.current.code, weather.current.isDay) : ""
-                            }
-                            Text {
-                                id: wxNowTemp
-                                anchors.left: wxNowGlyph.right
-                                anchors.leftMargin: 8
-
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: Style.text1
-                                font.family: Style.nerd
-                                font.pixelSize: 22
-                                font.bold: true
-                                text: weather.current ? Math.round(weather.current.temp) + "°" : ""
-                            }
-                            Text {
-                                anchors.left: wxNowTemp.right
-                                anchors.leftMargin: 8
-                                anchors.right: parent.right
-                                anchors.baseline: wxNowTemp.baseline
-                                elide: Text.ElideRight
-                                color: Style.text2
-                                font.family: Style.cjk
-                                font.pixelSize: 13
-
-                                text: weather.current ? I18n.t("wx.c." + weather.wmoKey(weather.current.code)) : ""
-                            }
-                        }
-
-                        Text {
-                            width: parent.width
-                            elide: Text.ElideRight
-                            color: Style.text3
-                            font.family: Style.cjk
-
-                            font.pixelSize: 13
-                            text: weather.current ? I18n.t("wx.feels") + " " + Math.round(weather.current.feels) + "°  " + I18n.t("wx.humidity") + " " + Math.round(weather.current.humidity) + "%  " + I18n.t("wx.wind") + " " + Math.round(weather.current.wind) + " km/h" : ""
-                        }
-
-                        Rectangle {
-                            width: parent.width
-                            height: 1
-                            color: Style.border
-                            opacity: 0.4
-                        }
-
-                        Repeater {
-                            model: weather.daily
-
-                            delegate: Item {
-                                required property var modelData
-                                required property int index
-                                width: parent ? parent.width : 0
-                                height: 24
-
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 52
-                                    elide: Text.ElideRight
-                                    color: Style.text2
-                                    font.family: Style.cjk
-                                    font.pixelSize: 13
-                                    text: index === 0 ? I18n.t("wx.today") : (index === 1 ? I18n.t("wx.tomorrow") : I18n.weekdayShort(weather.dayDate(modelData.date)))
-                                }
-                                Text {
-                                    id: wxDayGlyph
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 56
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    color: Style.text3
-                                    font.family: Style.nerd
-                                    font.pixelSize: 15
-                                    text: weather.glyph(modelData.code, true)
-                                }
-                                Text {
-                                    id: wxDayRange
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    color: Style.text2
-                                    font.family: Style.nerd
-                                    font.pixelSize: 13
-                                    text: Math.round(modelData.min) + " / " + Math.round(modelData.max) + "°"
-                                }
-
-                                Text {
-                                    anchors.left: wxDayGlyph.right
-                                    anchors.leftMargin: 8
-                                    anchors.right: wxDayRange.left
-                                    anchors.rightMargin: 8
-                                    anchors.verticalCenter: parent.verticalCenter
-
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
-                                    color: Style.text3
-                                    font.family: Style.cjk
-                                    font.pixelSize: 12
-                                    text: I18n.t("wx.c." + weather.wmoKey(modelData.code))
-                                }
-                            }
-                        }
-                    }
-                }
+                qsRoot: rootRef
+                panel: panelRef
+                weather: weatherRef
+                weatherModule: weatherModuleRef
             }
 
             AppLauncher {
@@ -3015,6 +1791,8 @@ ShellRoot {
             SettingsPanel {
                 id: settingsPanel
                 bar: panel
+                qsRoot: rootRef
+                notifCenter: notifCenterRef
             }
 
             PolkitPrompt {

@@ -53,11 +53,16 @@ printf 'auth include login\n' | sudo tee /etc/pam.d/quickshell-lock
   中三处与本机绑定的内容：壁纸输出名（用 `hyprctl monitors` 查看）、天气经纬度、
   `Style.qml` 顶部的字体名。
 - 多屏：每屏一份栏和面板，点击作用于聚焦屏；壁纸按输出名分别配置。
+- 亮度与麦克风（2026-10-24 起）：换机器**无需改任何东西**——内置屏背光走 logind（无包
+  依赖），外接屏自动探测 DDC/CI（想用需装 `ddcutil` 并把用户加入 `i2c` 组，建议 1.0+；
+  探测不到显示器就不显示该模块）；麦克风走 PipeWire，优先控制占用流实际连接的输入源，
+  链路与默认输入源都不可用时点击为空动作。
+  sysfs 背光的写入依赖 systemd-logind，非 systemd 发行版上表现为"模块在、调整不生效"。
 
 ## 版本与指纹
 
-设置面板右栏最下方有一行只读的**版本**（点击即关闭设置面板），启动日志开头也会输出
-`[QS] 配置版本 …`——报 bug、核对文档都以它为准。版本采用**日期版**（`YY.MM.DD` 表示这份配置的
+设置面板右栏最下方有一行只读的**版本**（点击或回车打开项目仓库，面板同时收起），启动日志开头也会输出
+`[QS] config version …`(2026-10-24 起日志为英文)——报 bug、核对文档都以它为准。版本采用**日期版**（`YY.MM.DD` 表示这份配置的
 日期），无需自行维护。发布包中带有 `manifest.json`，因此该行会额外显示 8 位**内容指纹**：
 
 | 面板显示（示例） | 含义 |
@@ -86,18 +91,22 @@ ssh-keygen -Y verify -n tintedbar-dist -f allowed_signers -I '<发布者身份>'
 | 天气不显示 | 检查设置中的“天气”开关、`weather.conf` 是否填写坐标，以及能否连接 Open-Meteo |
 | 剪贴板面板一直为空 | 合成器 autostart 中缺少 `wl-paste --watch cliphist store` |
 | 某个模块空白 | 多数是 D-Bus 服务未运行（NetworkManager / UPower / BlueZ / PipeWire） |
+| 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。调整后屏幕约 0.5~4 秒才跟上属正常（显示器受理一次写后会短暂拒绝后续写，配置已内置写冷却）；日志中的 `[BRIGHT]` 会给出后端与失败原因 |
 | 修改 `.qml` 后没有变化 | 保存的可能是未被加载的文件；在日志中搜索 `Reloading configuration` / `Configuration Loaded` |
 | `ipc call` 报找不到 target / 名称错误 | 用 `quickshell ipc show` 列出当前所有 target 与子命令 |
 | 锁屏无法进入 | 连续输错 3 次会进入 `pam_faillock` 冷却（等待 10 分钟或切换 TTY；见“锁屏”） |
-| 想确认运行的是哪一版 | 查看设置面板右栏最下方的**版本**，或日志开头的 `[QS] 配置版本 <日期>`；带 `≠` 表示内容被改动过（见“版本与指纹”） |
+| 想确认运行的是哪一版 | 查看设置面板右栏最下方的**版本**，或日志开头的 `[QS] config version <日期>`；带 `≠` 表示内容被改动过（见“版本与指纹”） |
 
 ## 目录结构
 
 ```text
 shell.qml                    栏与各面板窗口（PopupWindow）
-components/                  Style（配色） · I18n（文案/日期） · Lunar（农历）
-                             Almanac（干支/月相/节气） · Weather
-                             启动器/剪贴板/电源/通知/设置面板 · LockScreen · 各组按钮
+components/                  Style（配色/字体） · Compositor（组合器单例：工作区/全屏/
+                             键盘布局等，§ 见仓库文档） · I18n（文案/日期） · Lunar（农历）
+                             Almanac（干支/月相/节气） · Weather · IconProbe（图标探测）
+                             启动器/剪贴板/电源/通知/设置面板 · LockScreen
+                             栏上模块与时钟/天气/亮度弹窗（2026-10-24 起从 shell.qml
+                             拆出为独立文件） · 各组按钮
 scripts/                     icon-follow.sh · launch-desktop.sh · theme-apply.sh
                              theme-toggle.sh · theme-css.sh（把主题 CSS 解析成“名字=值”）
 icons/                       电源菜单用的图片

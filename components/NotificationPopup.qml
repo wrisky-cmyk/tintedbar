@@ -40,6 +40,16 @@ Item {
     readonly property real textWidth: card.cardWidth - card.textX - card.pad
     readonly property real contentHeight: Math.max(card.hasIcon ? card.iconSize : 0, textCol.implicitHeight)
 
+    readonly property int pillCount: {
+        if (!card.note)
+            return 0;
+        let n = 0;
+        for (const a of Style.modelValues(card.note.actions))
+            if (String(a && a.text || "") !== "")
+                n++;
+        return n;
+    }
+
     implicitWidth: card.cardWidth
     implicitHeight: card.pad * 2 + card.contentHeight
 
@@ -179,6 +189,34 @@ Item {
                                     return;
                                 a.invoke();
                             }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: card.pillCount === 1
+                    implicitWidth: ignoreText.implicitWidth + 24
+                    implicitHeight: 26
+                    radius: 13
+                    color: ignoreMouse.containsMouse ? Style.notifBorder(card.urgency) : Style.withAlpha(Style.text1, 0.10)
+
+                    Text {
+                        id: ignoreText
+                        anchors.centerIn: parent
+                        text: I18n.t("notif.ignore")
+                        color: ignoreMouse.containsMouse ? Style.card : Style.notifText
+                        font.family: Style.cjk
+                        font.pixelSize: 13
+                    }
+
+                    SafeMouseArea {
+                        id: ignoreMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (!card.noteClosed && card.note)
+                                card.note.dismiss();
                         }
                     }
                 }
