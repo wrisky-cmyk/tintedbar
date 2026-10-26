@@ -5,11 +5,12 @@ import QtQml
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import Quickshell.Wayland._ToplevelManagement
 
 Item {
     id: root
 
-    readonly property bool debug: Quickshell.env("QS_DEBUG") === "1"
+    property bool debug: Quickshell.env("QS_DEBUG") === "1"
 
     readonly property string name: {
         const d = String(Quickshell.env("XDG_CURRENT_DESKTOP") || "").toLowerCase();
@@ -37,10 +38,10 @@ Item {
     Process {
         id: niriSnapshot
         running: root.name === "niri"
-        command: ["sh", "-c", "for i in $(seq 1 50); do [ -S \"$NIRI_SOCKET\" ] && break; sleep 0.2; done; " + "niri msg --json windows; printf '\n--WS--\n'; niri msg --json workspaces"]
+        command: ["sh", "-c", "for i in $(seq 1 50); do [ -S \"$NIRI_SOCKET\" ] && break; sleep 0.2; done; " + "niri msg --json windows && printf '\n--WS--\n' && " + "niri msg --json workspaces && printf '\n--DONE--\n'"]
         stdout: StdioCollector {
             onStreamFinished: {
-                let sawMarker = false;
+                let sawComplete = false;
                 const stage = {
                     s: "windows"
                 };
@@ -50,7 +51,10 @@ Item {
                         continue;
                     if (t === "--WS--") {
                         stage.s = "workspaces";
-                        sawMarker = true;
+                        continue;
+                    }
+                    if (t === "--DONE--") {
+                        sawComplete = true;
                         continue;
                     }
                     try {
@@ -63,7 +67,7 @@ Item {
                 }
                 root.niriRebind();
                 root.compositorUpdated();
-                if (!sawMarker && root.name === "niri" && niriSnapshotRetry.retryCount < 3)
+                if (!sawComplete && root.name === "niri" && niriSnapshotRetry.retryCount < 3)
                     niriSnapshotRetry.restart();
             }
         }
@@ -256,22 +260,11 @@ Item {
             root.niriLayout = String(root.niriLayoutNames[kb.current_idx] || "");
         } else if (key === "KeyboardLayoutSwitched") {
             root.niriLayout = String(root.niriLayoutNames[v.idx] || v.idx);
-        } else if (key === "WindowLayoutsChanged") {
-            for (const c of (v.changes || [])) {
-                const wid = Array.isArray(c) ? c[0] : c.id;
-                const layout = Array.isArray(c) ? c[1] : c.layout;
-                for (const w of root.niriWindows)
-                    if (String(w.wid) === String(wid)) {
-                        w.layout = layout;
-                        break;
-                    }
-            }
         } else if (key === "ConfigLoaded") {
             return;
         } else {
             return;
         }
-        root.recomputeNiriFullscreen();
         root.compositorUpdated();
     }
 
@@ -335,10 +328,11 @@ Item {
             Quickshell.execDetached(["niri", "msg", "action", enable ? "power-on-monitors" : "power-off-monitors"]);
             return;
         }
+
         if (Hyprland.usingLua) {
-            Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.dpms(\"" + (enable ? "on" : "off") + "\")"]);
+            Hyprland.dispatch('hl.dsp.dpms("' + (enable ? "on" : "off") + '")');
         } else {
-            Quickshell.execDetached(["hyprctl", "dispatch", "dpms", enable ? "on" : "off"]);
+            Hyprland.dispatch("dpms " + (enable ? "on" : "off"));
         }
     }
 
@@ -347,10 +341,11 @@ Item {
             Quickshell.execDetached(["niri", "msg", "action", "close-window"]);
             return;
         }
+
         if (Hyprland.usingLua) {
-            Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.window.close()"]);
+            Hyprland.dispatch("hl.dsp.window.close()");
         } else {
-            Quickshell.execDetached(["hyprctl", "dispatch", "killwindow"]);
+            Hyprland.dispatch("killwindow");
         }
     }
 
@@ -394,82 +389,12 @@ Item {
         return m ? m[1].toLowerCase() : String(n).slice(0, 2).toLowerCase();
     }
 
-    property bool fullscreenActive: false
+    property bool fullscreenActive: {
+        const t = ToplevelManager.activeToplevel;
+        return t ? t.fullscreen === true : false;
+    }
 
     onFullscreenActiveChanged: console.log("[FS] focused window fullscreen = " + (fullscreenActive ? "yes" : "no"))
-
-    property bool fullscreenWatch: true
-    Process {
-        id: hyprFullscreenQuery
-        running: false
-
-        command: ["sh", "-c", "hyprctl -j activewindow 2>/dev/null | tr ',' '\\n' " + "| grep -oE '\"fullscreen[^\"]*\": *[0-9]+' | grep -oE '[0-9]+$' | sort -n | tail -1"]
-        stdout: StdioCollector {
-
-            onStreamFinished: root.fullscreenActive = Number(String(text).trim() || "0") >= 2
-        }
-    }
-
-    function refreshHyprFullscreen() {
-        hyprFullscreenQuery.running = true;
-    }
-
-    Timer {
-        interval: 60000
-        repeat: true
-        running: root.name === "hyprland" && root.fullscreenWatch
-        triggeredOnStart: true
-        onTriggered: root.refreshHyprFullscreen()
-    }
-    Connections {
-        target: root.name === "hyprland" ? Hyprland : null
-        function onRawEvent(event) {
-            const n = String(event.name);
-            if (n !== "fullscreen" && n !== "fullscreenv2")
-                return;
-
-            root.refreshHyprFullscreen();
-        }
-    }
-
-    function recomputeNiriFullscreen() {
-        if (root.name !== "niri")
-            return;
-        let w = null;
-        for (const e of root.niriWindows)
-            if (e.focused) {
-                w = e;
-                break;
-            }
-        const out = Quickshell.screens.find(s => s.name === root.niriFocusedOutput);
-        root.fullscreenActive = !!(out && w && w.layout && w.layout.window_size && Number(w.layout.window_size[0]) === out.width && Number(w.layout.window_size[1]) === out.height);
-    }
-
-    Timer {
-        interval: 30000
-        repeat: true
-
-        running: root.name === "niri" && root.fullscreenWatch
-        triggeredOnStart: true
-        onTriggered: niriFullscreenQuery.running = true
-    }
-    Process {
-        id: niriFullscreenQuery
-        command: ["niri", "msg", "--json", "focused-window"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    const w = JSON.parse(text);
-                    for (const e of root.niriWindows)
-                        if (String(e.wid) === String(w.id)) {
-                            e.layout = w.layout;
-                            break;
-                        }
-                } catch (e) {}
-                root.recomputeNiriFullscreen();
-            }
-        }
-    }
 
     readonly property var appNameAlias: {
         "微信": "wechat",
@@ -544,17 +469,14 @@ Item {
         if (root.debug)
             console.log("[FOCUS] match class=" + bestCls + " (fallback addr=" + bestAddr + ")");
 
-        if (focusPick.running) {
-            focusPick.pendingKeys = keys;
-            focusPick.pendingCls = bestCls;
-            focusPick.pendingAddr = bestAddr;
-            return true;
-        }
-        focusPick.candKeys = keys;
-        focusPick.fallbackCls = bestCls;
-        focusPick.fallbackAddr = bestAddr;
-        focusPick.command = ["hyprctl", "-j", "clients"];
-        focusPick.running = true;
+        fhPickup.keys = keys;
+        fhPickup.fallbackCls = bestCls;
+        fhPickup.fallbackAddr = bestAddr;
+        fhPickup.sentinelToplevel = best;
+        fhPickup.sentinelIpc = best.lastIpcObject;
+        fhPickup.attempts = 0;
+        Hyprland.refreshToplevels();
+        fhPickup.restart();
         return true;
     }
 
@@ -568,67 +490,74 @@ Item {
         return false;
     }
 
-    Process {
-        id: focusPick
-        property var candKeys: []
+    Timer {
+        id: fhPickup
+        interval: 50
+        repeat: true
+        property var keys: []
         property string fallbackCls: ""
         property string fallbackAddr: ""
 
-        property var pendingKeys: []
-        property string pendingCls: ""
-        property string pendingAddr: ""
-
-        onExited: if (pendingKeys.length > 0) {
-            candKeys = pendingKeys;
-            fallbackCls = pendingCls;
-            fallbackAddr = pendingAddr;
-            pendingKeys = [];
-            pendingCls = "";
-            pendingAddr = "";
-            command = ["hyprctl", "-j", "clients"];
-            running = true;
-        }
-        stdout: StdioCollector {
-            onStreamFinished: {
-                let list = [];
-                try {
-                    list = JSON.parse(text);
-                } catch (e) {
-                    list = [];
-                }
-                let cls = "";
-                let addr = "";
-                let fh = 1e9;
-                for (const c of list) {
-                    if (!root.matchKeys(String(c.class || ""), focusPick.candKeys))
-                        continue;
-                    const v = c.focusHistoryID;
-                    const h = (typeof v === "number" && v >= 0) ? v : 1e9;
-                    if (addr === "" || h < fh) {
-                        cls = String(c.class || "");
-                        addr = String(c.address || "");
-                        fh = h;
-                    }
-                }
-
-                if (addr === "" && cls === "") {
-                    cls = focusPick.fallbackCls;
-                    addr = focusPick.fallbackAddr;
-                }
-                if (addr === "" && cls === "")
-                    return;
-                root.focusWindowByAddress(cls, addr);
+        property var sentinelToplevel: null
+        property var sentinelIpc: null
+        property int attempts: 0
+        onTriggered: {
+            fhPickup.attempts++;
+            let refreshed = false;
+            try {
+                refreshed = !fhPickup.sentinelToplevel || fhPickup.sentinelToplevel.lastIpcObject !== fhPickup.sentinelIpc;
+            } catch (e) {
+                refreshed = true;
             }
+            if (!refreshed && fhPickup.attempts < 20)
+                return;
+            fhPickup.stop();
+            root.finishFocusPickup(refreshed);
         }
     }
 
+    function finishFocusPickup(refreshed) {
+        let cls = "";
+        let addr = "";
+
+        if (refreshed) {
+            let fh = 1e9;
+            for (const ws of root.modelValues(Hyprland.workspaces)) {
+                for (const t of root.modelValues(ws.toplevels)) {
+                    const o = t.lastIpcObject;
+                    if (!o || !root.matchKeys(String(o.class || ""), fhPickup.keys))
+                        continue;
+                    const v = o.focusHistoryID;
+                    const h = (typeof v === "number" && v >= 0) ? v : 1e9;
+                    if (addr === "" || h < fh) {
+                        cls = String(o.class || "");
+                        addr = String(o.address || "");
+                        fh = h;
+                    }
+                }
+            }
+        }
+        if (addr === "" && cls === "") {
+            cls = fhPickup.fallbackCls;
+            addr = fhPickup.fallbackAddr;
+        }
+        if (root.debug) {
+            console.log("[FOCUS] pickup " + (refreshed ? "refreshed" : "timeout") + " after " + (fhPickup.attempts * fhPickup.interval) + "ms");
+        }
+        fhPickup.sentinelToplevel = null;
+        fhPickup.sentinelIpc = null;
+        if (addr === "" && cls === "")
+            return;
+        root.focusWindowByAddress(cls, addr);
+    }
+
     function focusWindowByAddress(cls, addr) {
-        const sel = addr !== "" ? "address:" + root.luaStr(addr) : "class:" + root.luaStr(cls);
+        const pattern = addr !== "" ? "address:" + addr : "class:" + cls;
 
         if (Hyprland.usingLua) {
-            Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"" + sel + "\" })"]);
+            Hyprland.dispatch('hl.dsp.focus({ window = "' + root.luaStr(pattern) + '" })');
         } else {
-            Quickshell.execDetached(["hyprctl", "dispatch", "focuswindow", sel]);
+            Hyprland.dispatch("focuswindow " + pattern);
         }
     }
 

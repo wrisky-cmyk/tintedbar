@@ -62,6 +62,8 @@ Module {
         micPopup.open()
     onRightClicked: if (privacyModule.micActive)
         privacyModule.toggleMicMute()
+    onShownChanged: if (!privacyModule.shown)
+        micPopup.close()
     onMicActiveChanged: if (!privacyModule.micActive)
         micPopup.close()
     onSourceAudioChanged: if (!privacyModule.sourceAudio)

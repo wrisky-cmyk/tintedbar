@@ -469,7 +469,7 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.10.24"
+    readonly property string version: "26.10.26"
 
     readonly property string fingerprintCmd: "find shell.qml components scripts icons -type f ! -name '.*' ! -name '*~' ! -name '*.swp' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8"
     property string packedVersion: ""
@@ -520,7 +520,7 @@ Item {
         }
     }
 
-    readonly property bool debug: Quickshell.env("QS_DEBUG") === "1"
+    property bool debug: Quickshell.env("QS_DEBUG") === "1"
 
     readonly property string home: Quickshell.env("HOME") || ""
 
@@ -564,6 +564,9 @@ Item {
 
     Component.onCompleted: {
         console.log("[QS] config version " + root.version);
+
+        if (!Quickshell.hasVersion(0, 3))
+            console.warn("[QS] quickshell < 0.3 detected, this config requires 0.3.x");
         if (!root.cjkFontOk)
             console.warn("[FONT] font not found \"" + root.cjkFont + "\", falling back to default");
         if (!root.nerdFontOk)

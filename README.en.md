@@ -113,6 +113,8 @@ network control (currently in Chinese).
 | Network | Open nm-applet | Toggle Wi-Fi radio; disconnect or reconnect the Ethernet link; disconnect the current link from the speed readout |
 | Bluetooth | Open blueman-manager | Toggle Bluetooth power |
 | Volume | Open pavucontrol | Mute/unmute the default output |
+| Now playing (opt-in) | Play / pause (wheel = next / previous track) | Next track |
+| Microphone (shown while in use) | Open the input-volume slider | Toggle mic mute (icon turns crossed-out and dims) |
 | Brightness | Open the brightness slider | — |
 | Light/dark / temperature etc. | Toggle system light/dark mode / open `top` in a terminal | — |
 | Idle inhibitor | Toggle “inhibit now” | Lock immediately |

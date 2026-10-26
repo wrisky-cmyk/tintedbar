@@ -53,10 +53,19 @@ printf 'auth include login\n' | sudo tee /etc/pam.d/quickshell-lock
   中三处与本机绑定的内容：壁纸输出名（用 `hyprctl monitors` 查看）、天气经纬度、
   `Style.qml` 顶部的字体名。
 - 多屏：每屏一份栏和面板，点击作用于聚焦屏；壁纸按输出名分别配置。
+- **选 GTK 主题的建议**：想深浅切换全应用生效，选**出厂自带深色变体**的主题
+  （`nwg-look` 列表里能配对深浅的：Adwaita、Breeze、Orchis、Catppuccin 等）——
+  GTK3 老应用与走 GTK 主题的 Qt 应用读的是**主题文件的颜色**，不看深浅标准信号；
+  主题只有一份时它们不跟随（仅 libadwaita／浏览器／portal 应用跟随），不算故障。
+  只有 Qt 主题的用户装 **breeze-gtk** 指过去即可，Qt/GTK/状态栏同一家族；
+  完全不装 GTK 主题也能用（栏固定走内置默认深色档，应用层照切）。
+  Qt 应用要跟 GTK 主题，需在系统侧自行导出 `QT_QPA_PLATFORMTHEME=gtk3`
+  （如 `/etc/environment`；本配置不代设）。注意该插件在**进程启动时读一次**主题，
+  切深浅后已开的 Qt 应用要重开才变，且观感为近似跟随。
 - 亮度与麦克风（V26.10.24起）：换机器**无需改任何东西**——内置屏背光走 logind（无包
   依赖），外接屏自动探测 DDC/CI（想用需装 `ddcutil` 并把用户加入 `i2c` 组，建议 1.0+；
   探测不到显示器就不显示该模块）；麦克风走 PipeWire，优先控制占用流实际连接的输入源，
-  链路与默认输入源都不可用时点击为空动作。
+  多条流时优先默认源，链路与默认输入源都不可用时点击为空动作。
   sysfs 背光的写入依赖 systemd-logind，非 systemd 发行版上表现为"模块在、调整不生效"。
 
 ## 版本与指纹
@@ -91,7 +100,7 @@ ssh-keygen -Y verify -n tintedbar-dist -f allowed_signers -I '<发布者身份>'
 | 天气不显示 | 检查设置中的“天气”开关、`weather.conf` 是否填写坐标，以及能否连接 Open-Meteo |
 | 剪贴板面板一直为空 | 合成器 autostart 中缺少 `wl-paste --watch cliphist store` |
 | 某个模块空白 | 多数是 D-Bus 服务未运行（NetworkManager / UPower / BlueZ / PipeWire） |
-| 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。调整后屏幕约 0.5~4 秒才跟上属正常（显示器受理一次写后会短暂拒绝后续写，配置已内置写冷却）；日志中的 `[BRIGHT]` 会给出后端与失败原因 |
+| 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。调整后屏幕约 0.5~4 秒才跟上属正常（显示器受理一次写后会短暂拒绝后续写，配置已内置写冷却）；`quickshell ipc call brightness state` 可查 backend / percent |
 | 修改 `.qml` 后没有变化 | 保存的可能是未被加载的文件；在日志中搜索 `Reloading configuration` / `Configuration Loaded` |
 | `ipc call` 报找不到 target / 名称错误 | 用 `quickshell ipc show` 列出当前所有 target 与子命令 |
 | 锁屏无法进入 | 连续输错 3 次会进入 `pam_faillock` 冷却（等待 10 分钟或切换 TTY；见“锁屏”） |

@@ -611,6 +611,18 @@ ShellRoot {
                 l.toggle();
             }
         }
+        function open(): void {
+            const l = qsRoot.panelForFocused(qsRoot.calendarByScreen);
+            if (l) {
+                l.open();
+            }
+        }
+        function close(): void {
+            const l = qsRoot.panelForFocused(qsRoot.calendarByScreen);
+            if (l) {
+                l.close();
+            }
+        }
     }
 
     IpcHandler {
@@ -789,6 +801,32 @@ ShellRoot {
 
         function mute(): string {
             return qsRoot.audioToggleMute("ipc");
+        }
+    }
+    IpcHandler {
+        target: "debug"
+
+        function on(): string {
+            Style.debug = true;
+            Compositor.debug = true;
+            return JSON.stringify({
+                debug: true,
+                compositor: true
+            });
+        }
+        function off(): string {
+            Style.debug = false;
+            Compositor.debug = false;
+            return JSON.stringify({
+                debug: false,
+                compositor: false
+            });
+        }
+        function state(): string {
+            return JSON.stringify({
+                debug: Style.debug,
+                compositor: Compositor.debug
+            });
         }
     }
     IpcHandler {
@@ -1044,12 +1082,6 @@ ShellRoot {
     RebootNeeded {
         id: rebootNeeded
         enabled: qsRoot.showReboot
-    }
-
-    Binding {
-        target: Compositor
-        property: "fullscreenWatch"
-        value: qsRoot.fullscreenDnd || qsRoot.fullscreenIdleInhibit
     }
 
     Variants {

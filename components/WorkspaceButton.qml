@@ -226,5 +226,6 @@ Item {
         onTriggered: wsBtn.scheduleRefresh()
     }
 
+    onOutputNameChanged: wsBtn.scheduleRefresh()
     Component.onCompleted: wsBtn.refresh()
 }

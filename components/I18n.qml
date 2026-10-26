@@ -110,7 +110,7 @@ QtObject {
                 "lock.hint": "Enter 解锁 · Esc 清空",
                 "lock.capsOn": "Caps Lock 已开",
                 "reboot.title": "该重启了",
-                "reboot.reloginTitle": "该重登了",
+                "reboot.reloginTitle": "该重登录了",
                 "reboot.action": "现在重启",
                 "reboot.reloginAction": "现在注销",
                 "reboot.kernelItems": "内核已更新：{names}",
