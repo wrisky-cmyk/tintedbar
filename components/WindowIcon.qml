@@ -6,7 +6,27 @@ Item {
     id: winIcon
 
     required property var toplevel
+
+    property var wsBtnRef
     property int iconSize: 18
+
+    readonly property bool pulsing: winIcon.wsBtnRef && winIcon.wsBtnRef.pulseHit(winIcon.toplevel)
+    SequentialAnimation on opacity {
+        id: pulseAnim
+        running: winIcon.pulsing && !winIcon.urgent
+        loops: Animation.Infinite
+        NumberAnimation {
+            to: 0.2
+            duration: 280
+        }
+        NumberAnimation {
+            to: 1.0
+            duration: 280
+        }
+
+        onRunningChanged: if (!pulseAnim.running)
+            winIcon.opacity = 1.0
+    }
 
     implicitWidth: winIcon.iconSize
     implicitHeight: winIcon.iconSize
@@ -17,6 +37,25 @@ Item {
     readonly property string glyph: Style.glyphFor(winIcon.appClass, winIcon.title)
 
     property string appIcon: ""
+
+    readonly property bool urgent: toplevel ? toplevel.urgent === true : false
+    SequentialAnimation on opacity {
+        id: urgentAnim
+        running: winIcon.urgent && !winIcon.pulsing
+        loops: Animation.Infinite
+        alwaysRunToEnd: false
+        NumberAnimation {
+            to: 0.25
+            duration: 140
+        }
+        NumberAnimation {
+            to: 1.0
+            duration: 140
+        }
+
+        onRunningChanged: if (!urgentAnim.running)
+            winIcon.opacity = 1.0
+    }
     property int retries: 0
 
     function updateClass() {

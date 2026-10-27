@@ -67,6 +67,12 @@ Item {
             height: parent.height
             radius: 5
             color: Style.fill
+            Behavior on width {
+                enabled: !volSlider.dragging
+                NumberAnimation {
+                    duration: 150
+                }
+            }
         }
     }
 

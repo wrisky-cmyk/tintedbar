@@ -20,6 +20,8 @@ Item {
 
     property bool shown: true
 
+    property bool hoverTint: true
+
     property int glyphYOffset: 0
     signal clicked
     signal rightClicked
@@ -37,6 +39,22 @@ Item {
         radius: btn.rad
         color: btn.bgColor
         opacity: btn.opacityVal
+    }
+
+    Rectangle {
+        anchors.left: parent.left
+        anchors.leftMargin: btn.marginLeft
+        anchors.top: parent.top
+        width: parent.width - btn.marginLeft - btn.marginRight
+        height: parent.height
+        radius: btn.rad
+        color: "#ffffff"
+        opacity: (btn.hoverTint && btnMouse.containsMouse) ? 0.05 : 0
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 100
+            }
+        }
     }
 
     Row {
@@ -76,8 +94,8 @@ Item {
         anchors.top: parent.top
         width: parent.width - btn.marginLeft - btn.marginRight
         height: parent.height
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
+        hoverEnabled: btn.hoverTint
+        cursorShape: btn.hoverTint ? Qt.PointingHandCursor : Qt.ArrowCursor
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onClicked: m => {
             if (m.button === Qt.RightButton)

@@ -5,7 +5,7 @@ import QtQml
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
-import Quickshell.Wayland._ToplevelManagement
+import Quickshell.Wayland
 
 Item {
     id: root
@@ -65,7 +65,6 @@ Item {
                             root.applyNiriWorkspaces(arr);
                     } catch (e) {}
                 }
-                root.niriRebind();
                 root.compositorUpdated();
                 if (!sawComplete && root.name === "niri" && niriSnapshotRetry.retryCount < 3)
                     niriSnapshotRetry.restart();
@@ -115,10 +114,9 @@ Item {
                     wid: w.id,
                     wsid: w.workspace_id,
                     focused: false,
-                    wsIdx: 1,
-                    layout: w.layout,
                     obj: {
                         __wid: w.id,
+                        urgent: !!w.is_urgent,
                         class: app,
                         title: String(w.title || ""),
                         wayland: {
@@ -135,8 +133,8 @@ Item {
                 e.obj.class = app;
                 e.obj.wayland.appId = app;
                 e.obj.lastIpcObject.class = app;
+                e.obj.urgent = !!w.is_urgent;
                 e.wsid = w.workspace_id;
-                e.layout = w.layout;
             }
             e.focused = !!w.is_focused;
             kept.push(e);
@@ -161,14 +159,6 @@ Item {
             }
     }
 
-    function niriRebind() {
-        const idxById = {};
-        for (const ws of root.niriWsList)
-            idxById[ws.id] = ws.idx;
-        for (const w of root.niriWindows)
-            w.wsIdx = idxById[w.wsid] || 1;
-    }
-
     function handleNiriEvent(line) {
         const t = line.trim();
         if (t === "")
@@ -183,7 +173,6 @@ Item {
         const v = ev[key];
         if (key === "WorkspacesChanged") {
             root.applyNiriWorkspaces(v.workspaces);
-            root.niriRebind();
         } else if (key === "WorkspaceActivated") {
             for (const ws of root.niriWsList)
                 ws.focused = (ws.id === v.id) && v.focused !== false;
@@ -196,7 +185,6 @@ Item {
                 }
         } else if (key === "WindowsChanged") {
             root.applyNiriWindows(v.windows);
-            root.niriRebind();
         } else if (key === "WindowOpenedOrChanged") {
             const w = v.window;
             const app = String(w.app_id || "");
@@ -211,9 +199,9 @@ Item {
                 found.obj.class = app;
                 found.obj.wayland.appId = app;
                 found.obj.lastIpcObject.class = app;
+                found.obj.urgent = !!w.is_urgent;
                 found.wsid = w.workspace_id;
                 found.focused = !!w.is_focused;
-                found.layout = w.layout;
 
                 root.niriWindows = root.niriWindows.slice();
             } else {
@@ -222,10 +210,9 @@ Item {
                         wid: w.id,
                         wsid: w.workspace_id,
                         focused: !!w.is_focused,
-                        wsIdx: 1,
-                        layout: w.layout,
                         obj: {
                             __wid: w.id,
+                            urgent: !!w.is_urgent,
                             class: app,
                             title: String(w.title || ""),
                             wayland: {
@@ -239,7 +226,6 @@ Item {
                     }
                 ]);
             }
-            root.niriRebind();
         } else if (key === "WindowClosed") {
             const cid = (v.id !== undefined) ? v.id : v.window_id;
             root.niriWindows = root.niriWindows.filter(w => String(w.wid) !== String(cid));
@@ -253,6 +239,11 @@ Item {
                 if (w.wid === v.id)
                     w.obj.title = String(v.title || "");
 
+            root.niriWindows = root.niriWindows.slice();
+        } else if (key === "WindowUrgencyChanged") {
+            for (const w of root.niriWindows)
+                if (String(w.wid) === String(v.id))
+                    w.obj.urgent = v.urgent === true;
             root.niriWindows = root.niriWindows.slice();
         } else if (key === "KeyboardLayoutsChanged") {
             const kb = v.keyboard_layouts || {};
@@ -403,9 +394,12 @@ Item {
         "网易云音乐": "netease-cloud-music-gtk4"
     }
 
-    function focusAppWindow(candidates) {
+    function candidateKeys(candidates) {
         const keys = [];
-        for (const c of candidates) {
+        if (!candidates)
+            return keys;
+        const list = Array.isArray(candidates) ? candidates : [candidates];
+        for (const c of list) {
             if (!c)
                 continue;
             const s = String(c).toLowerCase();
@@ -415,6 +409,11 @@ Item {
             if (alias && keys.indexOf(alias) < 0)
                 keys.push(alias);
         }
+        return keys;
+    }
+
+    function focusAppWindow(candidates) {
+        const keys = root.candidateKeys(candidates);
         if (keys.length === 0)
             return false;
         if (root.debug)
@@ -484,10 +483,133 @@ Item {
         const c = String(cls || "").toLowerCase();
         if (c === "")
             return false;
-        for (const k of keys)
+
+        for (const k0 of keys) {
+            const k = String(k0 || "").toLowerCase();
             if (c.indexOf(k) >= 0 || k.indexOf(c) >= 0)
                 return true;
+        }
         return false;
+    }
+
+    function toplevelClass(t) {
+        try {
+            return (t.wayland && t.wayland.appId) ? String(t.wayland.appId) : (t.lastIpcObject ? String(t.lastIpcObject["class"] || "") : "");
+        } catch (e) {
+            return "";
+        }
+    }
+
+    function notificationPulseTarget(keys) {
+        if (root.name === "hyprland") {
+            let best = null;
+            let bestFh = 1e9;
+            for (const ws of root.modelValues(Hyprland.workspaces)) {
+                for (const t of root.modelValues(ws.toplevels)) {
+                    if (!root.matchKeys(root.toplevelClass(t), keys))
+                        continue;
+                    let fh = -1;
+                    try {
+                        if (t.lastIpcObject && typeof t.lastIpcObject.focusHistoryID === "number")
+                            fh = t.lastIpcObject.focusHistoryID;
+                    } catch (e) {}
+                    if (fh >= 0 && fh < bestFh) {
+                        bestFh = fh;
+                        best = t;
+                    }
+                }
+            }
+            if (root.debug && best)
+                console.log("[PULSE] target class=" + root.toplevelClass(best) + " fh=" + bestFh);
+            return best;
+        }
+        if (root.name === "niri") {
+            let first = null;
+            for (const w of root.niriWindows) {
+                if (!root.matchKeys(w.obj.class, keys))
+                    continue;
+                if (w.focused)
+                    return w.obj;
+                if (first === null)
+                    first = w.obj;
+            }
+            return first;
+        }
+        return null;
+    }
+
+    signal notificationPulseReady(var keys, bool fresh, var target)
+    property var notificationPulseKeys: []
+    property bool notificationPulseRefreshing: false
+    property var notificationPulseSentinels: []
+
+    function requestNotificationPulse(candidates) {
+        const keys = root.candidateKeys(candidates);
+        if (keys.length === 0)
+            return;
+        for (const k of keys)
+            if (root.notificationPulseKeys.indexOf(k) < 0)
+                root.notificationPulseKeys.push(k);
+        if (root.name !== "hyprland") {
+            root.finishNotificationPulse(false);
+            return;
+        }
+        if (root.notificationPulseRefreshing)
+            return;
+        root.notificationPulseRefreshing = true;
+        root.notificationPulseSentinels = [];
+        for (const ws of root.modelValues(Hyprland.workspaces)) {
+            for (const t of root.modelValues(ws.toplevels)) {
+                try {
+                    if (t && t.lastIpcObject)
+                        root.notificationPulseSentinels.push({
+                            toplevel: t,
+                            ipc: t.lastIpcObject
+                        });
+                } catch (e) {}
+            }
+        }
+        if (root.debug)
+            console.log("[PULSE] refresh keys=" + JSON.stringify(root.notificationPulseKeys));
+        Hyprland.refreshToplevels();
+        pulseRefreshTimer.attempts = 0;
+        pulseRefreshTimer.restart();
+    }
+
+    function finishNotificationPulse(fresh) {
+        pulseRefreshTimer.stop();
+        const keys = root.notificationPulseKeys;
+
+        const target = (root.name === "niri" || fresh) ? root.notificationPulseTarget(keys) : null;
+        root.notificationPulseKeys = [];
+        root.notificationPulseRefreshing = false;
+        root.notificationPulseSentinels = [];
+        if (root.debug)
+            console.log("[PULSE] ready fresh=" + fresh + " keys=" + JSON.stringify(keys));
+        if (keys.length > 0)
+            root.notificationPulseReady(keys, fresh, target);
+    }
+
+    Timer {
+        id: pulseRefreshTimer
+        interval: 50
+        repeat: true
+        property int attempts: 0
+        onTriggered: {
+            pulseRefreshTimer.attempts++;
+            let refreshed = root.notificationPulseSentinels.length > 0;
+            for (const pair of root.notificationPulseSentinels) {
+                try {
+                    if (pair.toplevel.lastIpcObject === pair.ipc) {
+                        refreshed = false;
+                        break;
+                    }
+                } catch (e) {}
+            }
+            if (!refreshed && pulseRefreshTimer.attempts < 10)
+                return;
+            root.finishNotificationPulse(refreshed);
+        }
     }
 
     Timer {

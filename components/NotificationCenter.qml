@@ -288,6 +288,9 @@ Item {
                 console.log("[NOTIFY] t=" + Date.now() + " received:", n.appName, "/", n.summary, "urgency=" + n.urgency, "timeout=" + n.expireTimeout);
             }
             center.onArrive(n);
+
+            if (!center.dnd && !center.popupSuppressed)
+                Compositor.requestNotificationPulse([n.appName, n.desktopEntry, n.appIcon]);
             center.armTest(n);
         }
     }

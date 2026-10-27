@@ -32,6 +32,9 @@ Module {
     readonly property int writeCooldownMs: 4000
     property double lastWriteDoneAt: 0
 
+    readonly property bool supportsLiveDrag: brightnessModule.backend === "sysfs"
+    readonly property int liveDragIntervalMs: 50
+
     property bool preview: false
 
     shown: brightnessModule.preview || (qsRoot.showBrightness && brightnessModule.backend !== "")
@@ -56,30 +59,10 @@ Module {
             return;
         const p = brightnessModule.pendingPct;
         brightnessModule.pendingPct = -1;
-        brightnessModule.setPct(p, "flush");
+        brightnessModule.writePct(p, "flush");
     }
-    function setPct(p, how) {
-        p = Math.round(p);
-        if (!(p >= 0 && p <= 100)) {
-            console.log("[BRIGHT] " + how + " out of range: " + p);
-            return;
-        }
-        if (brightnessModule.backend === "" && !brightnessModule.preview)
-            return;
-        if (brightnessModule.ddcBusy) {
-            brightnessModule.pendingPct = p;
-            return;
-        }
-        if (brightnessModule.pct >= 0 && p === brightnessModule.pct) {
-            brightnessModule.pendingPct = -1;
-            return;
-        }
-        if (brightnessModule.pct < 0) {
-            brightnessModule.refresh();
-            return;
-        }
-        brightnessModule.pct = p;
-        console.log("[BRIGHT] " + how + " → " + p + "%");
+
+    function writePct(p, how) {
         if (brightnessModule.preview && brightnessModule.backend === "") {
             console.log("[BRIGHT] preview mode, display only, no backend write");
             return;
@@ -94,18 +77,63 @@ Module {
             brightnessWrite.command = ["bash", "-c", "busctl call org.freedesktop.login1 /org/freedesktop/login1/session/self " + "org.freedesktop.login1.Session SetBrightness ssu backlight " + brightnessModule.sysfsDev + " " + v];
             brightnessWrite.running = true;
             writeWatchdog.restart();
-        } else {
-            const gap = Date.now() - brightnessModule.lastWriteDoneAt;
-            if (gap < brightnessModule.writeCooldownMs) {
-                brightnessModule.pendingPct = p;
-                writeCooldownTimer.interval = brightnessModule.writeCooldownMs - gap + 100;
-                writeCooldownTimer.restart();
+            return;
+        }
+
+        const gap = Date.now() - brightnessModule.lastWriteDoneAt;
+        if (gap < brightnessModule.writeCooldownMs) {
+            brightnessModule.pendingPct = p;
+            writeCooldownTimer.interval = brightnessModule.writeCooldownMs - gap + 100;
+            writeCooldownTimer.restart();
+            return;
+        }
+        brightnessWrite.command = brightnessModule.ddcArgs().concat(["setvcp", "10", String(p)]);
+        brightnessWrite.running = true;
+        writeWatchdog.restart();
+    }
+    function setPct(p, how) {
+        p = Math.round(p);
+        if (!(p >= 0 && p <= 100)) {
+            console.log("[BRIGHT] " + how + " out of range: " + p);
+            return;
+        }
+        if (brightnessModule.backend === "" && !brightnessModule.preview)
+            return;
+        if (brightnessModule.backend === "" && brightnessModule.preview) {
+            brightnessModule.pct = p;
+            console.log("[BRIGHT] " + how + " → " + p + "%");
+            brightnessModule.writePct(p, how);
+            return;
+        }
+        if (brightnessModule.pct < 0) {
+            brightnessModule.pendingPct = p;
+            brightnessModule.refresh();
+            return;
+        }
+        if (brightnessModule.ddcBusy) {
+            if (p === brightnessModule.pendingPct) {
+                brightnessModule.pct = p;
                 return;
             }
-            brightnessWrite.command = brightnessModule.ddcArgs().concat(["setvcp", "10", String(p)]);
-            brightnessWrite.running = true;
-            writeWatchdog.restart();
+            if (p === brightnessModule.pct) {
+                brightnessModule.pendingPct = -1;
+                return;
+            }
+            brightnessModule.pendingPct = p;
+            brightnessModule.pct = p;
+            if (how !== "popup-drag")
+                console.log("[BRIGHT] " + how + " → " + p + "% (queued)");
+            return;
         }
+        if (p === brightnessModule.pct) {
+            if (brightnessModule.pendingPct !== p)
+                brightnessModule.pendingPct = -1;
+            return;
+        }
+        brightnessModule.pct = p;
+        if (how !== "popup-drag")
+            console.log("[BRIGHT] " + how + " → " + p + "%");
+        brightnessModule.writePct(p, how);
     }
 
     function refresh() {

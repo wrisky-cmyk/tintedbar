@@ -7,6 +7,25 @@ Item {
 
     property string outputName: ""
 
+    property var pulseTops: []
+
+    function pulseHit(t) {
+        if (!t)
+            return false;
+        for (const p of pulseTops) {
+            if (wsBtn.sameToplevel(p, t))
+                return true;
+        }
+        return false;
+    }
+    function sameToplevel(a, b) {
+        if (!a || !b)
+            return false;
+        if (a.__wid !== undefined && b.__wid !== undefined)
+            return String(a.__wid) === String(b.__wid);
+        return a === b;
+    }
+
     readonly property bool niri: Compositor.name === "niri"
 
     property var ws: null
@@ -14,7 +33,7 @@ Item {
     readonly property bool focused: wsBtn.niri ? Compositor.workspaceFocused(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? wsBtn.ws.focused : false)
     readonly property bool hasWindows: iconModel.count > 0
 
-    readonly property real contentOpacity: focused ? 1.0 : (hasWindows ? 0.9 : 0.3)
+    readonly property real contentOpacity: focused ? 1.0 : (hasWindows ? 0.75 : 0.3)
 
     ListModel {
         id: iconModel
@@ -55,7 +74,7 @@ Item {
                 continue;
 
             const old = iconModel.get(idx).toplevel;
-            if (old && (old.title !== t.title || old.class !== t.class))
+            if (old && (old.title !== t.title || old.class !== t.class || old.urgent !== t.urgent))
                 iconModel.setProperty(idx, "toplevel", t);
         }
     }
@@ -64,34 +83,34 @@ Item {
     implicitHeight: Style.barContentHeight
 
     Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.bottom
-        height: 2
-        color: Qt.rgba(0, 0, 0, 0.18)
-        visible: wsBtn.focused
-        z: -1
+        anchors.fill: parent
+        radius: 8
+        color: "#ffffff"
+        opacity: (wsMouse.containsMouse && !wsBtn.focused) ? 0.06 : 0
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 120
+            }
+        }
     }
 
     Rectangle {
         id: wsBg
         anchors.fill: parent
         radius: 8
-        color: "transparent"
-        border.width: wsBtn.focused ? 1.5 : 0
-
-        border.color: "#94a3b8"
-        opacity: wsBtn.focused ? 1.0 : (wsBtn.hasWindows ? 0.9 : 0.3)
-    }
-
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: 1
-        color: Style.border
-        opacity: 0.16
-        visible: wsBtn.hasWindows && !wsBtn.focused
+        color: wsBtn.focused ? Style.withAlpha(Style.accent, 0.18) : "transparent"
+        border.width: 1
+        border.color: wsBtn.focused ? Style.withAlpha(Style.accent, 0.45) : "transparent"
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
+        Behavior on border.color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
     }
 
     Row {
@@ -108,6 +127,11 @@ Item {
             font.pixelSize: 18
             font.weight: Font.Bold
             opacity: wsBtn.contentOpacity
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 120
+                }
+            }
         }
 
         Repeater {
@@ -116,17 +140,25 @@ Item {
                 width: 18
                 height: 24
                 opacity: wsBtn.contentOpacity
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 120
+                    }
+                }
 
                 WindowIcon {
                     anchors.centerIn: parent
                     iconSize: 18
                     toplevel: model.toplevel
+
+                    wsBtnRef: wsBtn
                 }
             }
         }
     }
 
     MouseArea {
+        id: wsMouse
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
@@ -224,6 +256,38 @@ Item {
         repeat: true
         running: true
         onTriggered: wsBtn.scheduleRefresh()
+    }
+
+    Connections {
+        target: Compositor
+        function onNotificationPulseReady(keys, fresh, target) {
+            wsBtn.pulseTops = [];
+            if (!wsBtn.hasWindows)
+                return;
+            const matched = [];
+            for (let i = 0; i < iconModel.count; i++) {
+                const t = iconModel.get(i).toplevel;
+                if (!t)
+                    continue;
+                if (target) {
+                    if (wsBtn.sameToplevel(t, target))
+                        matched.push(t);
+                } else if (Compositor.matchKeys(Compositor.toplevelClass(t), keys)) {
+                    matched.push(t);
+                }
+            }
+            if (matched.length === 0)
+                return;
+            if (Style.debug)
+                console.log("[PULSE] workspace=" + wsBtn.wsId + " matched=" + matched.length + " target=" + !!target);
+            wsBtn.pulseTops = matched;
+            pulseClear.restart();
+        }
+    }
+    Timer {
+        id: pulseClear
+        interval: 3000
+        onTriggered: wsBtn.pulseTops = []
     }
 
     onOutputNameChanged: wsBtn.scheduleRefresh()

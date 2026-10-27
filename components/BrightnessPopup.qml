@@ -9,11 +9,11 @@ PopupWindow {
 
     visible: false
     function open() {
-        if (brightnessModule.backend === "" && !brightnessModule.preview)
+        if (brightnessPopup.brightnessModule.backend === "" && !brightnessPopup.brightnessModule.preview)
             return;
 
-        if (brightnessModule.pct < 0)
-            brightnessModule.refresh();
+        if (brightnessPopup.brightnessModule.pct < 0)
+            brightnessPopup.brightnessModule.refresh();
         brightnessPopup.visible = true;
     }
     function close() {
@@ -25,7 +25,7 @@ PopupWindow {
     implicitHeight: 48 + Style.barHeight + 2 - Style.barInset
     grabFocus: true
     anchor.window: panel
-    anchor.item: brightnessModule
+    anchor.item: brightnessPopup.brightnessModule
     anchor.edges: Edges.Bottom
     anchor.gravity: Edges.Top
 
@@ -92,7 +92,7 @@ PopupWindow {
                 while (Math.abs(brCard.wheelAccum) >= 120) {
                     const dir = brCard.wheelAccum > 0 ? 1 : -1;
                     brCard.wheelAccum -= dir * 120;
-                    brightnessModule.stepPct(dir * 5, "popup-wheel");
+                    brightnessPopup.brightnessModule.stepPct(dir * 5, "popup-wheel");
                 }
             }
             onPressed: m => {
@@ -102,12 +102,23 @@ PopupWindow {
             onReleased: m => {
                 brCard.dragging = false;
 
-                brightnessModule.setPct(brCard.dragPct, "popup x" + brCard.lastX);
+                brightnessPopup.brightnessModule.setPct(brCard.dragPct, "popup x" + brCard.lastX);
             }
             onCanceled: brCard.dragging = false
             onPositionChanged: m => {
                 if (brCard.dragging)
                     brCard.setFromX(m.x);
+            }
+        }
+
+        Timer {
+            id: liveDragWrite
+            interval: brightnessPopup.brightnessModule.liveDragIntervalMs
+            repeat: true
+            running: brCard.dragging && brightnessPopup.brightnessModule.supportsLiveDrag
+            onTriggered: {
+                if (brCard.dragging)
+                    brightnessPopup.brightnessModule.setPct(brCard.dragPct, "popup-drag");
             }
         }
     }

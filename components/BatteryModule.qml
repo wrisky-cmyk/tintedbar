@@ -9,6 +9,7 @@ Module {
     shown: qsRoot.showBattery && batteryModule.bat !== null
 
     bgColor: batteryModule.critical ? Style.danger : Style.bg
+    hoverTint: false
     opacityVal: batteryModule.critical ? (batteryModule.blinkOn ? 1.0 : 0.35) : 1.0
     radius: 5
     padLeft: 6

@@ -37,7 +37,7 @@ There is no persistent Python/Node process, and it uses the network only for wea
 | Hyprland or niri (`hyprctl` / `niri msg`) | Workspaces, titles, focus, DPMS |
 | D-Bus session bus + NetworkManager / UPower / BlueZ / PipeWire / notification service | Network, battery, Bluetooth, volume, notifications; missing services leave the corresponding module empty without crashing |
 | `sh` + coreutils (`grep`/`sed`/`find`/`df`) | Read `/proc`, `/sys`, and invoke CLI tools |
-| Fonts **JetBrainsMono Nerd Font (v3+)** + **Noto Sans CJK SC** | Icon glyphs and Chinese; falls back to system fonts with a `[FONT]` WARN. **v3 or newer required**: brightness/weather/bluetooth-off glyphs use v3-remapped codepoints and break (silently) on v2 |
+| Fonts **JetBrainsMono Nerd Font (v3+)** + **Noto Sans CJK SC** | Icon glyphs and Chinese. A missing preferred font emits a `[FONT]` warning; Nerd Font automatically selects another installed family, while Chinese uses the system font fallback. **Nerd Font v3 or newer is required**: brightness/weather/bluetooth-off glyphs use v3-remapped codepoints and break on v2 even when the family name matches. If no usable Nerd Font is installed, install one or change the preferred name in `Style.qml` |
 
 **Optional, per module** (missing pieces only affect that module):
 

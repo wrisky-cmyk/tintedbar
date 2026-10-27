@@ -34,7 +34,7 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 | Hyprland 或 niri（`hyprctl` / `niri msg`） | 工作区、标题、焦点、DPMS |
 | D-Bus 会话总线 + NetworkManager / UPower / BlueZ / PipeWire / 通知服务 | 网络、电池、蓝牙、音量、通知；缺失时对应模块留空，不会崩溃 |
 | `sh` + coreutils（`grep`/`sed`/`find`/`df`） | 读取 `/proc`、`/sys`，调用命令行工具 |
-| 字体 **JetBrainsMono Nerd Font（v3+）** + **Noto Sans CJK SC** | 图标字形与中文；缺失时回退系统字体，并输出 `[FONT]` WARN（常见豆腐块）。**需 v3 及以上**：亮度/天气/蓝牙关等图标用的是 v3 重映射后的码位，v2 上会错位或豆腐（检测只认字体名，不报错） |
+| 字体 **JetBrainsMono Nerd Font（v3+）** + **Noto Sans CJK SC** | 图标字形与中文。首选缺失会输出 `[FONT]` WARN；Nerd Font 会自动从已安装家族中选择替代品，中文交给系统字体回退。**Nerd Font 需 v3 及以上**：亮度/天气/蓝牙关等图标使用 v3 重映射码位，v2 字体名能对上但图标会错位或变成豆腐。找不到可用 Nerd Font 时仍需手动安装或修改 `Style.qml` 首选名 |
 
 **按模块可选**（缺失只影响对应功能）：
 

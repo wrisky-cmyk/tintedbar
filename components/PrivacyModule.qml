@@ -10,6 +10,8 @@ Module {
 
     shown: qsRoot.showPrivacy && (privacyModule.micActive || privacyModule.shareActive)
     bgColor: "transparent"
+
+    hoverTint: privacyModule.micActive
     radius: 0
 
     padLeft: 3
@@ -104,7 +106,11 @@ Module {
             if (privacyModule.isUserMicStream(link.source))
                 add(link.target);
         }
-        privacyModule.activeMicSources = found;
+        const old = privacyModule.activeMicSources;
+        const same = found.length === old.length && found.every((n, i) => String(n.id) === String(old[i].id));
+
+        if (!same)
+            privacyModule.activeMicSources = found;
     }
     function refreshPrivacy() {
         let mic = false, share = false;
@@ -234,6 +240,13 @@ Module {
                     height: parent.height
                     radius: 5
                     color: Style.fill
+
+                    Behavior on width {
+                        enabled: !micCard.dragging
+                        NumberAnimation {
+                            duration: 150
+                        }
+                    }
                 }
             }
 

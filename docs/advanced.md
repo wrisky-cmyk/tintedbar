@@ -50,8 +50,9 @@ printf 'auth include login\n' | sudo tee /etc/pam.d/quickshell-lock
   因此目录可以随意放置。电池、温度、LED、网卡探测不到时，对应模块整块隐藏。
 - `weather.conf` 和 `wallpapers.conf` 随包附带，而且**不改也能运行**：壁纸默认纯色，天气坐标留空时
   模块隐藏（需要时填写 `lat=` / `lon=`）。换机器通常只需调整[可手改的配置文件](reference.md#可手改的配置文件)
-  中三处与本机绑定的内容：壁纸输出名（用 `hyprctl monitors` 查看）、天气经纬度、
-  `Style.qml` 顶部的字体名。
+  中两处与本机绑定的内容：壁纸输出名（用 `hyprctl monitors` 查看）和天气经纬度。
+  字体通常无需修改：Nerd Font 会自动从已安装字体中选择，中文交给系统回退；只有想更换
+  首选字体时才修改 `Style.qml` 顶部的字体名。
 - 多屏：每屏一份栏和面板，点击作用于聚焦屏；壁纸按输出名分别配置。
 - **选 GTK 主题的建议**：想深浅切换全应用生效，选**出厂自带深色变体**的主题
   （`nwg-look` 列表里能配对深浅的：Adwaita、Breeze、Orchis、Catppuccin 等）——
@@ -96,11 +97,11 @@ ssh-keygen -Y verify -n tintedbar-dist -f allowed_signers -I '<发布者身份>'
 | 现象 | 排查方向 |
 | --- | --- |
 | 栏没有出现 | 查看日志中的 `Failed to load`（热重载时也会输出）；语法错误时栏不会自行恢复 |
-| 图标显示为豆腐块 / 中文变成方框 | 字体未安装或名称不对，日志会出现 `[FONT]` WARN；修改 `Style.qml` 顶部 |
+| 图标显示为豆腐块 / 中文变成方框 | Nerd Font 首选缺失会在日志输出 `[FONT]` WARN，并自动改用其它已安装的 Nerd Font；若仍无图标，安装 v3+ Nerd Font，或在 `Style.qml` 顶部指定已安装的家族。中文方框说明系统缺少可用 CJK 字体 |
 | 天气不显示 | 检查设置中的“天气”开关、`weather.conf` 是否填写坐标，以及能否连接 Open-Meteo |
 | 剪贴板面板一直为空 | 合成器 autostart 中缺少 `wl-paste --watch cliphist store` |
 | 某个模块空白 | 多数是 D-Bus 服务未运行（NetworkManager / UPower / BlueZ / PipeWire） |
-| 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。调整后屏幕约 0.5~4 秒才跟上属正常（显示器受理一次写后会短暂拒绝后续写，配置已内置写冷却）；`quickshell ipc call brightness state` 可查 backend / percent |
+| 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。内置屏拖动滑条时会实时跟随；外接屏松手后约 0.5~4 秒才跟上属正常，DDC/CI 在一次写入后会短暂拒绝后续命令。`quickshell ipc call brightness state` 可查 backend / percent |
 | 修改 `.qml` 后没有变化 | 保存的可能是未被加载的文件；在日志中搜索 `Reloading configuration` / `Configuration Loaded` |
 | `ipc call` 报找不到 target / 名称错误 | 用 `quickshell ipc show` 列出当前所有 target 与子命令 |
 | 锁屏无法进入 | 连续输错 3 次会进入 `pam_faillock` 冷却（等待 10 分钟或切换 TTY；见“锁屏”） |

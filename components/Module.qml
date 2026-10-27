@@ -37,6 +37,19 @@ Item {
         opacity: mod.opacityVal
     }
 
+    property bool hoverTint: true
+    Rectangle {
+        anchors.fill: bgRect
+        radius: mod.radius
+        color: "#ffffff"
+        opacity: (mouse.containsMouse && mod.hoverTint) ? 0.05 : 0
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 100
+            }
+        }
+    }
+
     Item {
         id: contentItem
         x: mod.marginLeft + mod.padLeft
@@ -51,8 +64,8 @@ Item {
         y: 0
         width: bgRect.width
         height: mod.implicitHeight
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
+        hoverEnabled: mod.hoverTint
+        cursorShape: mod.hoverTint ? Qt.PointingHandCursor : Qt.ArrowCursor
 
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onClicked: m => {

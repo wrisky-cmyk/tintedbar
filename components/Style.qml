@@ -23,7 +23,33 @@ Item {
     readonly property bool nerdFontOk: root.fontLoaded(root.nerdFont)
 
     readonly property string cjk: root.cjkFontOk ? root.cjkFont : ""
-    readonly property string nerd: root.nerdFontOk ? root.nerdFont : ""
+
+    function isNerdFamily(name) {
+        return /(?:\bNerd\s+Font\b|\bNF(?:M|P)?\b)/i.test(String(name));
+    }
+    function pickNerdFallback() {
+        const installed = root.fontFamilies.filter(root.isNerdFamily);
+        if (installed.length === 0)
+            return "";
+
+        const styleAlias = /\b(?:Thin|ExtraLight|Light|Regular|Medium|SemiBold|Bold|ExtraBold|Black|Italic)\b/i;
+        const monoHint = /\b(?:Mono|Code|Term|Console)\b|JetBrains|Meslo|Fira|Hack|Iosevka|Caskaydia|SauceCode/i;
+        installed.sort((a, b) => {
+            const as = /symbols/i.test(a), bs = /symbols/i.test(b);
+            if (as !== bs)
+                return as ? 1 : -1;
+            const aa = styleAlias.test(a), ba = styleAlias.test(b);
+            if (aa !== ba)
+                return aa ? 1 : -1;
+            const am = monoHint.test(a), bm = monoHint.test(b);
+            if (am !== bm)
+                return am ? -1 : 1;
+            return String(a).localeCompare(String(b));
+        });
+        return installed[0];
+    }
+    readonly property string nerdFallback: pickNerdFallback()
+    readonly property string nerd: root.nerdFontOk ? root.nerdFont : root.nerdFallback
 
     property bool systemDark: true
     property string iconTheme: ""
@@ -469,7 +495,50 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.10.26"
+    readonly property string version: "26.10.27"
+    readonly property string minQuickshellVersion: "0.3.2"
+    property string runningQuickshellVersion: ""
+    property bool quickshellVersionChecked: false
+
+    function parseVersion(raw) {
+        const m = /(?:Quickshell\s+)?(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(raw));
+        if (!m)
+            return null;
+        return [Number(m[1]), Number(m[2]), Number(m[3] || 0)];
+    }
+    function versionAtLeast(raw, minimum) {
+        const have = root.parseVersion(raw);
+        const need = root.parseVersion(minimum);
+        if (have === null || need === null)
+            return null;
+        for (let i = 0; i < 3; i++) {
+            if (have[i] !== need[i])
+                return have[i] > need[i];
+        }
+        return true;
+    }
+    function checkQuickshellVersion(raw) {
+        if (root.quickshellVersionChecked)
+            return;
+        root.quickshellVersionChecked = true;
+        const parsed = root.parseVersion(raw);
+        root.runningQuickshellVersion = parsed === null ? "" : parsed.slice(0, 3).join(".");
+        const ok = root.versionAtLeast(raw, root.minQuickshellVersion);
+        if (ok === false)
+            console.warn("[QS] quickshell " + root.runningQuickshellVersion + " detected, this config requires >= " + root.minQuickshellVersion);
+        else if (ok === null)
+            console.warn("[QS] cannot detect quickshell version, this config requires >= " + root.minQuickshellVersion);
+    }
+    Process {
+        id: versionProbe
+        running: true
+        command: ["quickshell", "--version"]
+        stdout: StdioCollector {
+            id: versionOutput
+            onStreamFinished: root.checkQuickshellVersion(text)
+        }
+        onExited: root.checkQuickshellVersion(versionOutput.text)
+    }
 
     readonly property string fingerprintCmd: "find shell.qml components scripts icons -type f ! -name '.*' ! -name '*~' ! -name '*.swp' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8"
     property string packedVersion: ""
@@ -564,13 +633,10 @@ Item {
 
     Component.onCompleted: {
         console.log("[QS] config version " + root.version);
-
-        if (!Quickshell.hasVersion(0, 3))
-            console.warn("[QS] quickshell < 0.3 detected, this config requires 0.3.x");
         if (!root.cjkFontOk)
-            console.warn("[FONT] font not found \"" + root.cjkFont + "\", falling back to default");
+            console.warn("[FONT] preferred cjk font \"" + root.cjkFont + "\" missing" + (root.cjk !== "" ? ", using \"" + root.cjk + "\"" : ", no fallback"));
         if (!root.nerdFontOk)
-            console.warn("[FONT] font not found \"" + root.nerdFont + "\", falling back to default (nerd icon glyphs may be missing)");
+            console.warn("[FONT] preferred nerd font \"" + root.nerdFont + "\" missing" + (root.nerd !== "" ? ", using \"" + root.nerd + "\"" : ", no fallback (nerd icon glyphs will be missing)"));
         DesktopEntries.applicationsChanged.connect(() => {
             root.desktopEntryCache = {};
         });

@@ -1182,7 +1182,8 @@ ShellRoot {
 
                         border.width: 1
                         border.color: "#3394a3b8"
-                        opacity: 0.85
+
+                        opacity: 1.0
 
                         Row {
                             id: workspacesRow
@@ -1309,6 +1310,8 @@ ShellRoot {
 
                     BarButton {
                         id: tempModule
+
+                        hoverTint: false
                         bgColor: "transparent"
                         rad: 4
                         padH: 2
@@ -1760,6 +1763,8 @@ ShellRoot {
                         id: langModule
                         shown: qsRoot.showLanguage
                         bgColor: "transparent"
+
+                        hoverTint: false
                         radius: 0
                         padLeft: 5
 

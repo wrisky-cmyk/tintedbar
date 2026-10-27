@@ -7,6 +7,7 @@ Module {
 
     shown: qsRoot.showKeyboard && (kbModule.num || kbModule.caps)
     bgColor: "transparent"
+    hoverTint: false
     radius: 0
     padLeft: 3
     padRight: 1
