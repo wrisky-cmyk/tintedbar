@@ -107,7 +107,20 @@ Module {
                 add(link.target);
         }
         const old = privacyModule.activeMicSources;
-        const same = found.length === old.length && found.every((n, i) => String(n.id) === String(old[i].id));
+
+        let same = found.length === old.length;
+        if (same) {
+            try {
+                for (let i = 0; i < found.length; i++) {
+                    if (String(found[i].id) !== String(old[i].id)) {
+                        same = false;
+                        break;
+                    }
+                }
+            } catch (e) {
+                same = false;
+            }
+        }
 
         if (!same)
             privacyModule.activeMicSources = found;

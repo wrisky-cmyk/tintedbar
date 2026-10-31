@@ -12,16 +12,41 @@ Item {
     property string text: ""
 
     signal output(string text)
+    signal started
+
+    readonly property alias running: proc.running
 
     function kick() {
-        if (!proc.running)
-            proc.running = true;
+        if (proc.running)
+            return false;
+        poller.kickQueued = false;
+        proc.running = true;
+        return true;
     }
+
+    function kickAfterExit() {
+        if (!proc.running)
+            return kick();
+        poller.kickQueued = true;
+        return true;
+    }
+
+    property bool kickQueued: false
 
     Process {
         id: proc
         running: false
         command: poller.command
+        onStarted: poller.started()
+        onExited: {
+            if (!poller.kickQueued)
+                return;
+            poller.kickQueued = false;
+
+            if (!poller.active)
+                return;
+            Qt.callLater(poller.kick);
+        }
         stdout: StdioCollector {
             waitForEnd: true
             onStreamFinished: {

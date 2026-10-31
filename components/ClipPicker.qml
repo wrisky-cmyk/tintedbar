@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import "."
@@ -7,6 +8,10 @@ OverlayPanel {
     id: picker
 
     property string query: ""
+
+    property bool clearArmed: false
+
+    property bool wipePendingReload: false
 
     property var entries: []
 
@@ -38,6 +43,7 @@ OverlayPanel {
     }
     function close() {
         visible = false;
+        picker.clearArmed = false;
     }
 
     property int headerSel: 0
@@ -84,6 +90,13 @@ OverlayPanel {
     }
     function pressSel(line) {
         if (picker.clearSel) {
+            if (!picker.clearArmed) {
+                picker.clearArmed = true;
+                clearArmReset.restart();
+                return;
+            }
+            picker.clearArmed = false;
+            clearArmReset.stop();
             picker.wipe();
             return;
         }
@@ -105,6 +118,11 @@ OverlayPanel {
     }
 
     function wipe() {
+        if (clipsLoad.running) {
+            wipePendingReload = true;
+            wipeProc.running = true;
+            return;
+        }
         picker.entries = [];
         wipeProc.running = true;
     }
@@ -113,8 +131,17 @@ OverlayPanel {
         id: clipsLoad
         running: false
         command: ["cliphist", "list"]
+
+        onExited: {
+            if (wipePendingReload) {
+                wipePendingReload = false;
+                clipsLoad.running = true;
+            }
+        }
         stdout: StdioCollector {
             onStreamFinished: {
+                if (wipePendingReload)
+                    return;
                 const out = [];
                 for (const l of String(text).split("\n")) {
                     if (l === "")
@@ -142,8 +169,7 @@ OverlayPanel {
         command: ["cliphist", "wipe"]
 
         onExited: exitCode => {
-            if (exitCode !== 0)
-                clipsLoad.running = true;
+            clipsLoad.running = true;
         }
     }
 
@@ -155,7 +181,8 @@ OverlayPanel {
     Rectangle {
         id: card
         width: 560
-        height: 420
+
+        height: Math.max(420, Screen.height - 240)
         anchors.centerIn: parent
         radius: 12
         color: Style.card
@@ -245,7 +272,7 @@ OverlayPanel {
 
                     Text {
                         anchors.centerIn: parent
-                        text: I18n.t("clips.clear")
+                        text: picker.clearArmed ? I18n.t("clips.clearConfirm") : I18n.t("clips.clear")
                         color: clearBtn.lit ? Style.danger : Style.text3
                         font.family: Style.cjk
                         font.pixelSize: 13
@@ -256,8 +283,23 @@ OverlayPanel {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: picker.wipe()
+                        onClicked: {
+                            if (!picker.clearArmed) {
+                                picker.clearArmed = true;
+                                clearArmReset.restart();
+                                return;
+                            }
+                            picker.clearArmed = false;
+                            clearArmReset.stop();
+                            picker.wipe();
+                        }
                     }
+                }
+
+                Timer {
+                    id: clearArmReset
+                    interval: 2000
+                    onTriggered: picker.clearArmed = false
                 }
             }
 

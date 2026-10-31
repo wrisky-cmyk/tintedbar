@@ -69,5 +69,16 @@ if grep -qs '^Terminal=true' "$f"; then
         *)         exec "$term" -e sh -c 'printf "\033]2;%s\007" "$1"; shift; exec "$@"' _ "$base" $exec_line "$@" ;;
     esac
 else
+
+    if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ $# -eq 0 ]; then
+
+        LC_ALL=C.UTF-8 printf -v shell_f '%q' "$f"
+        cmd="gio launch $shell_f"
+        esc=${cmd//\\/\\\\}
+        esc=${esc//\'/\\\'}
+        if hyprctl dispatch "hl.dsp.exec_cmd('$esc')" >/dev/null 2>&1; then
+            exit 0
+        fi
+    fi
     exec gio launch "$f" "$@"
 fi

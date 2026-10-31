@@ -24,6 +24,8 @@ Item {
 
     property bool stale: false
 
+    property string _requestUrl: ""
+
     readonly property bool ok: wx.current !== null
 
     readonly property bool ready: wx.enabled && wx.located && wx.ok
@@ -41,10 +43,21 @@ Item {
         interval: wx.refreshMs
 
         command: ["curl", "-fsS", "-m", "20", wx.url]
+        onStarted: wx._requestUrl = wx.url
+
+        onActiveChanged: {
+            if (active && running && wx._requestUrl !== wx.url)
+                weatherPoller.kickAfterExit();
+        }
         onOutput: text => wx.absorb(text)
     }
 
     function absorb(text) {
+        if (wx._requestUrl !== wx.url) {
+            if (wx.enabled && wx.located)
+                weatherPoller.kickAfterExit();
+            return;
+        }
         let obj = null;
         try {
             obj = JSON.parse(text);
@@ -181,7 +194,7 @@ Item {
         if (la !== oldLat || lo !== oldLon) {
             wx.stale = true;
             if (wx.enabled && wx.located)
-                weatherPoller.kick();
+                weatherPoller.kickAfterExit();
         }
     }
 

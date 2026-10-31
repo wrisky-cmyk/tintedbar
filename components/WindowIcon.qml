@@ -77,6 +77,7 @@ Item {
 
     function refresh() {
         const ti = Style.titleIcon(winIcon.title);
+        winIcon.appliedTitleIcon = ti;
         const names = winIcon.appClass ? Style.appIconNames(winIcon.appClass) : [];
 
         const all = ti ? [ti].concat(names) : names;
@@ -93,6 +94,13 @@ Item {
     }
 
     property string iconNamesKey: ""
+    property string appliedTitleIcon: ""
+
+    function refreshForTitle() {
+        if (Style.titleIcon(winIcon.title) === winIcon.appliedTitleIcon)
+            return;
+        winIcon.refresh();
+    }
 
     FileIcon {
         id: fileIcon
@@ -131,6 +139,10 @@ Item {
         function onLastIpcObjectChanged() {
             winIcon.updateClass();
         }
+
+        function onTitleChanged() {
+            winIcon.refreshForTitle();
+        }
     }
 
     Connections {
@@ -146,6 +158,10 @@ Item {
         running: winIcon.appClass === "" && winIcon.retries < 10
         onTriggered: {
             winIcon.retries++;
+
+            if (winIcon.retries % 2 === 1 && Style.compositor !== "niri") {
+                Compositor.requestToplevelResync("missing-class");
+            }
             winIcon.updateClass();
         }
     }

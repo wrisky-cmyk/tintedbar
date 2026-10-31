@@ -495,7 +495,7 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.10.27"
+    readonly property string version: "26.10.31"
     readonly property string minQuickshellVersion: "0.3.2"
     property string runningQuickshellVersion: ""
     property bool quickshellVersionChecked: false

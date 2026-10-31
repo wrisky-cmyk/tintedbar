@@ -51,7 +51,7 @@ OverlayPanel {
         Keys.onPressed: event => {
             for (let i = 0; i < buttonRow.children.length; i++) {
                 const b = buttonRow.children[i];
-                if (b.modelData && b.modelData.key === event.text) {
+                if (b.modelData && String(b.modelData.key).toLowerCase() === String(event.text).toLowerCase()) {
                     powerMenu.run(b.modelData.cmd);
                     return;
                 }

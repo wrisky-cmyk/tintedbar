@@ -26,6 +26,7 @@ OverlayPanel {
     function open() {
         visible = true;
         card.clearSel();
+        card.forceActiveFocus();
     }
     function close() {
         visible = false;

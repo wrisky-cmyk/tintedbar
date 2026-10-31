@@ -13,9 +13,11 @@ quickshell ipc call launcher toggle     # 启动器（还支持 open / close）
 quickshell ipc call clips toggle        # 剪贴板面板（还支持 open / close）
 quickshell ipc call powermenu toggle    # 电源菜单（还支持 open / close）
 quickshell ipc call settings toggle     # 设置面板（还支持 open / close）
-quickshell ipc call calendar toggle     # 时钟日历弹窗（仅 toggle）
+quickshell ipc call calendar toggle     # 时钟日历弹窗（还支持 open / close）
 quickshell ipc call weather toggle      # 天气面板（还支持 close）
-quickshell ipc call notify toggle       # 通知历史面板（还支持 close）
+quickshell ipc call notify toggle       # 通知历史面板（还支持 close / clear / state）
+quickshell ipc call notify clear        # 清空通知历史（与面板"全部删除"相同）
+quickshell ipc call notify state        # 一行 JSON：面板开合 / 历史条数 / 未读点 / 勿扰
 quickshell ipc call tray list           # 托盘项清单：id / 是否有菜单 / 标题
 quickshell ipc call tray menu           # 打开第一个带菜单的托盘项
 quickshell ipc call tray menuOf <id>    # 打开指定程序的菜单（先用 list 获取 id）
@@ -32,6 +34,18 @@ quickshell ipc call brightness set <0-100>  # 设置亮度
 quickshell ipc call brightness step <±N>    # 亮度步进
 quickshell ipc call brightness preview 1|0  # 强制渲染开关（临时预览，重载即回）
 quickshell ipc call debug on|off|state      # 运行中开关调试日志总闸（QS_DEBUG 的热替；进程级，不持久化）
+quickshell ipc call palette state       # 当前配色家族
+quickshell ipc call palette next        # 切到下一个家族（循环，同设置面板）
+quickshell ipc call palette set <家族>   # 直接指定：auto 或家族名（cyan / sea / …）
+quickshell ipc call palette colors      # 整张角色取色表 + 主题侧读到的定义数
+quickshell ipc call palette scan        # 扫描机器上已装主题及各自主色（维护家族表用）
+quickshell ipc call reboot state        # 重启提示：要不要重启/重登、各判据计数与明细
+quickshell ipc call reboot check        # 立即重新检查一次判据
+quickshell ipc call reboot notify       # 手动弹出一条重启提示通知
+quickshell ipc call reboot preview <k> <m> <l>  # 预览三档文案（只返回文本，不真发）
+quickshell ipc call reboot previewCurrent  # 按当前真实状态预览文案
+quickshell ipc call polkit state        # 授权弹窗当前是否在显示
+quickshell ipc call polkit cancel       # 关掉当前授权弹窗（等同点取消）
 ```
 
 多屏时，launcher / clips / powermenu / settings / calendar / weather / tray / brightness 作用于**聚焦屏**；
@@ -58,7 +72,8 @@ lock / wallpaper / bt 则是全局的。
 | 锁屏 / 授权弹窗 | 输入密码后回车确认（锁屏 Esc 清空重置）；授权弹窗 Esc = 取消 |
 
 **列表头部的按钮**：剪贴板有两颗——“显示”条数步进（←→ 调节）和“清空”（回车执行）；
-通知历史只有一颗“全部删除”。持续按 ↑ 离开列表会进入这些按钮；列表为空时整块隐藏，
+通知历史只有一颗“全部删除”（**两段式**：第一击/回车进入“确认清除？”，2 秒内再击才执行，
+超时自动复位）。持续按 ↑ 离开列表会进入这些按钮；列表为空时整块隐藏，
 键盘也不会移过去。
 
 鼠标操作完全不受影响：键盘选中与鼠标悬停共用同一条高亮底色。

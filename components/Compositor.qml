@@ -174,15 +174,26 @@ Item {
         if (key === "WorkspacesChanged") {
             root.applyNiriWorkspaces(v.workspaces);
         } else if (key === "WorkspaceActivated") {
-            for (const ws of root.niriWsList)
-                ws.focused = (ws.id === v.id) && v.focused !== false;
-
-            root.niriWsList = root.niriWsList.slice();
-            for (const ws of root.niriWsList)
-                if (ws.focused) {
-                    root.niriFocusedIdx = ws.idx;
-                    root.niriFocusedOutput = ws.output;
+            const act = root.niriWsList.find(ws => ws.id === v.id);
+            if (v.focused === false && act) {
+                for (const ws of root.niriWsList) {
+                    if (ws.id === v.id)
+                        ws.focused = true;
+                    else if (ws.focused && ws.output === act.output)
+                        ws.focused = false;
                 }
+                root.niriWsList = root.niriWsList.slice();
+            } else {
+                for (const ws of root.niriWsList)
+                    ws.focused = ws.id === v.id;
+
+                root.niriWsList = root.niriWsList.slice();
+                for (const ws of root.niriWsList)
+                    if (ws.focused) {
+                        root.niriFocusedIdx = ws.idx;
+                        root.niriFocusedOutput = ws.output;
+                    }
+            }
         } else if (key === "WindowsChanged") {
             root.applyNiriWindows(v.windows);
         } else if (key === "WindowOpenedOrChanged") {
@@ -321,7 +332,7 @@ Item {
         }
 
         if (Hyprland.usingLua) {
-            Hyprland.dispatch('hl.dsp.dpms("' + (enable ? "on" : "off") + '")');
+            Hyprland.dispatch('hl.dsp.dpms({ action = "' + (enable ? "on" : "off") + '" })');
         } else {
             Hyprland.dispatch("dpms " + (enable ? "on" : "off"));
         }
@@ -412,6 +423,18 @@ Item {
         return keys;
     }
 
+    function toplevelIpcFingerprint(t) {
+        try {
+            const ipc = t ? t.lastIpcObject : null;
+            if (ipc === undefined || ipc === null)
+                return "<missing>";
+            const text = JSON.stringify(ipc);
+            return typeof text === "string" ? text : "<unserializable>";
+        } catch (e) {
+            return "<missing>";
+        }
+    }
+
     function focusAppWindow(candidates) {
         const keys = root.candidateKeys(candidates);
         if (keys.length === 0)
@@ -472,7 +495,7 @@ Item {
         fhPickup.fallbackCls = bestCls;
         fhPickup.fallbackAddr = bestAddr;
         fhPickup.sentinelToplevel = best;
-        fhPickup.sentinelIpc = best.lastIpcObject;
+        fhPickup.sentinelSnap = root.toplevelIpcFingerprint(best);
         fhPickup.attempts = 0;
         Hyprland.refreshToplevels();
         fhPickup.restart();
@@ -541,6 +564,8 @@ Item {
     signal notificationPulseReady(var keys, bool fresh, var target)
     property var notificationPulseKeys: []
     property bool notificationPulseRefreshing: false
+
+    property bool notificationPulsePending: false
     property var notificationPulseSentinels: []
 
     function requestNotificationPulse(candidates) {
@@ -554,19 +579,24 @@ Item {
             root.finishNotificationPulse(false);
             return;
         }
-        if (root.notificationPulseRefreshing)
+        if (root.notificationPulseRefreshing) {
+            root.notificationPulsePending = true;
             return;
+        }
+        root.startNotificationPulseRefresh();
+    }
+
+    function startNotificationPulseRefresh() {
         root.notificationPulseRefreshing = true;
+        root.notificationPulsePending = false;
         root.notificationPulseSentinels = [];
         for (const ws of root.modelValues(Hyprland.workspaces)) {
             for (const t of root.modelValues(ws.toplevels)) {
-                try {
-                    if (t && t.lastIpcObject)
-                        root.notificationPulseSentinels.push({
-                            toplevel: t,
-                            ipc: t.lastIpcObject
-                        });
-                } catch (e) {}
+                if (t)
+                    root.notificationPulseSentinels.push({
+                        toplevel: t,
+                        snap: root.toplevelIpcFingerprint(t)
+                    });
             }
         }
         if (root.debug)
@@ -580,9 +610,10 @@ Item {
         pulseRefreshTimer.stop();
         const keys = root.notificationPulseKeys;
 
-        const target = (root.name === "niri" || fresh) ? root.notificationPulseTarget(keys) : null;
+        const target = root.notificationPulseTarget(keys);
         root.notificationPulseKeys = [];
         root.notificationPulseRefreshing = false;
+        root.notificationPulsePending = false;
         root.notificationPulseSentinels = [];
         if (root.debug)
             console.log("[PULSE] ready fresh=" + fresh + " keys=" + JSON.stringify(keys));
@@ -599,15 +630,17 @@ Item {
             pulseRefreshTimer.attempts++;
             let refreshed = root.notificationPulseSentinels.length > 0;
             for (const pair of root.notificationPulseSentinels) {
-                try {
-                    if (pair.toplevel.lastIpcObject === pair.ipc) {
-                        refreshed = false;
-                        break;
-                    }
-                } catch (e) {}
+                if (root.toplevelIpcFingerprint(pair.toplevel) === pair.snap) {
+                    refreshed = false;
+                    break;
+                }
             }
             if (!refreshed && pulseRefreshTimer.attempts < 10)
                 return;
+            if (root.notificationPulsePending) {
+                root.startNotificationPulseRefresh();
+                return;
+            }
             root.finishNotificationPulse(refreshed);
         }
     }
@@ -621,16 +654,11 @@ Item {
         property string fallbackAddr: ""
 
         property var sentinelToplevel: null
-        property var sentinelIpc: null
+        property string sentinelSnap: ""
         property int attempts: 0
         onTriggered: {
             fhPickup.attempts++;
-            let refreshed = false;
-            try {
-                refreshed = !fhPickup.sentinelToplevel || fhPickup.sentinelToplevel.lastIpcObject !== fhPickup.sentinelIpc;
-            } catch (e) {
-                refreshed = true;
-            }
+            const refreshed = !fhPickup.sentinelToplevel || root.toplevelIpcFingerprint(fhPickup.sentinelToplevel) !== fhPickup.sentinelSnap;
             if (!refreshed && fhPickup.attempts < 20)
                 return;
             fhPickup.stop();
@@ -641,21 +669,19 @@ Item {
     function finishFocusPickup(refreshed) {
         let cls = "";
         let addr = "";
+        let fh = 1e9;
 
-        if (refreshed) {
-            let fh = 1e9;
-            for (const ws of root.modelValues(Hyprland.workspaces)) {
-                for (const t of root.modelValues(ws.toplevels)) {
-                    const o = t.lastIpcObject;
-                    if (!o || !root.matchKeys(String(o.class || ""), fhPickup.keys))
-                        continue;
-                    const v = o.focusHistoryID;
-                    const h = (typeof v === "number" && v >= 0) ? v : 1e9;
-                    if (addr === "" || h < fh) {
-                        cls = String(o.class || "");
-                        addr = String(o.address || "");
-                        fh = h;
-                    }
+        for (const ws of root.modelValues(Hyprland.workspaces)) {
+            for (const t of root.modelValues(ws.toplevels)) {
+                const o = t.lastIpcObject;
+                if (!o || !root.matchKeys(String(o.class || ""), fhPickup.keys))
+                    continue;
+                const v = o.focusHistoryID;
+                const h = (typeof v === "number" && v >= 0) ? v : 1e9;
+                if (addr === "" || h < fh) {
+                    cls = String(o.class || "");
+                    addr = String(o.address || "");
+                    fh = h;
                 }
             }
         }
@@ -667,7 +693,7 @@ Item {
             console.log("[FOCUS] pickup " + (refreshed ? "refreshed" : "timeout") + " after " + (fhPickup.attempts * fhPickup.interval) + "ms");
         }
         fhPickup.sentinelToplevel = null;
-        fhPickup.sentinelIpc = null;
+        fhPickup.sentinelSnap = "";
         if (addr === "" && cls === "")
             return;
         root.focusWindowByAddress(cls, addr);
@@ -686,6 +712,9 @@ Item {
     function modelValues(model) {
         if (!model)
             return [];
+
+        if (Array.isArray(model))
+            return model;
         try {
             if (model.values) {
                 return typeof model.values === "function" ? model.values() : model.values;
@@ -712,11 +741,21 @@ Item {
     }
 
     function workspaceForId(id) {
+        let fallback = null;
+        const name = String(id);
         for (const w of root.modelValues(Hyprland.workspaces)) {
-            if (w && w.id === id)
+            if (!w)
+                continue;
+            if (w.id === id)
                 return w;
+            if (fallback === null && w.name === name)
+                fallback = w;
         }
-        return null;
+        return fallback;
+    }
+
+    function workspacesDump() {
+        return root.modelValues(Hyprland.workspaces).map(w => (w && w.id !== undefined ? w.id : "?") + ":" + (w ? w.name : "?")).join(",");
     }
 
     signal rawEvent(var event)
@@ -748,6 +787,144 @@ Item {
             if (root.debug)
                 console.log("[WSBTN]", id, "no ws object, classic dispatch");
             Hyprland.dispatch("workspace " + id);
+        }
+    }
+
+    property bool toplevelResyncInFlight: false
+    property var toplevelResyncSentinels: []
+    property int toplevelResyncCountBefore: 0
+    property int toplevelResyncAttempts: 0
+    property string toplevelResyncReason: ""
+    property string toplevelResyncActiveReason: ""
+
+    property bool toplevelResyncPending: false
+
+    function toplevelSnapshot() {
+        const sentinels = [];
+        let count = 0;
+        for (const ws of root.modelValues(Hyprland.workspaces)) {
+            for (const t of root.modelValues(ws.toplevels)) {
+                count++;
+                if (t)
+                    sentinels.push({
+                        toplevel: t,
+                        snap: root.toplevelIpcFingerprint(t)
+                    });
+            }
+        }
+        return {
+            count: count,
+            sentinels: sentinels
+        };
+    }
+
+    function requestToplevelResync(reason) {
+        if (root.name !== "hyprland")
+            return;
+        root.toplevelResyncReason = String(reason || "");
+        if (root.toplevelResyncInFlight) {
+            root.toplevelResyncPending = true;
+            return;
+        }
+        toplevelResyncDebounce.restart();
+    }
+
+    function toplevelResyncSnapshotChanged() {
+        let count = 0;
+        for (const ws of root.modelValues(Hyprland.workspaces))
+            count += root.modelValues(ws.toplevels).length;
+
+        if (root.toplevelResyncSentinels.length === 0)
+            return count > 0 && root.toplevelResyncCountBefore === 0;
+
+        for (const pair of root.toplevelResyncSentinels)
+            if (root.toplevelIpcFingerprint(pair.toplevel) !== pair.snap)
+                return true;
+        return false;
+    }
+
+    function finishToplevelResync(refreshed) {
+        const rerun = root.toplevelResyncPending;
+        toplevelResyncPoll.stop();
+        root.toplevelResyncInFlight = false;
+        root.toplevelResyncPending = false;
+        root.toplevelResyncSentinels = [];
+        root.toplevelResyncCountBefore = 0;
+        root.toplevelResyncAttempts = 0;
+        if (root.debug) {
+            console.log("[QS] toplevel resync " + root.toplevelResyncActiveReason + (refreshed ? " ready" : " timeout"));
+        }
+
+        root.rawEvent({
+            name: "openwindow",
+            data: ""
+        });
+        if (rerun && root.name === "hyprland")
+            toplevelResyncDebounce.restart();
+    }
+
+    function beginToplevelResync() {
+        if (root.name !== "hyprland" || root.toplevelResyncInFlight)
+            return;
+        root.toplevelResyncPending = false;
+
+        root.toplevelResyncActiveReason = root.toplevelResyncReason;
+        const snapshot = root.toplevelSnapshot();
+        root.toplevelResyncSentinels = snapshot.sentinels;
+        root.toplevelResyncCountBefore = snapshot.count;
+        root.toplevelResyncAttempts = 0;
+        root.toplevelResyncInFlight = true;
+        let requested = true;
+        try {
+            Hyprland.refreshToplevels();
+        } catch (e) {
+            requested = false;
+            console.warn("[QS] refreshToplevels 失败: " + e);
+        }
+        if (requested)
+            toplevelResyncPoll.restart();
+        else
+            root.finishToplevelResync(false);
+    }
+
+    Timer {
+        id: toplevelResyncDebounce
+        interval: 100
+        repeat: false
+        onTriggered: root.beginToplevelResync()
+    }
+    Timer {
+        id: toplevelResyncPoll
+        interval: 50
+        repeat: true
+        onTriggered: {
+            root.toplevelResyncAttempts++;
+            const refreshed = root.toplevelResyncSnapshotChanged();
+            if (refreshed || root.toplevelResyncAttempts >= 20)
+                root.finishToplevelResync(refreshed);
+        }
+    }
+
+    Timer {
+        id: loginResync1
+        interval: 4000
+        repeat: false
+        running: root.name === "hyprland"
+        onTriggered: {
+            if (root.debug)
+                console.log("[QS] login resync 1 (openwindow 丢弃自愈)");
+            root.requestToplevelResync("login-4s");
+        }
+    }
+    Timer {
+        id: loginResync2
+        interval: 12000
+        repeat: false
+        running: root.name === "hyprland"
+        onTriggered: {
+            if (root.debug)
+                console.log("[QS] login resync 2 (openwindow 丢弃自愈)");
+            root.requestToplevelResync("login-12s");
         }
     }
 }

@@ -45,7 +45,7 @@ Item {
             return 0;
         let n = 0;
         for (const a of Style.modelValues(card.note.actions))
-            if (String(a && a.text || "") !== "")
+            if (a && (a.identifier === "default" || String(a.text || "") !== ""))
                 n++;
         return n;
     }
@@ -151,7 +151,7 @@ Item {
             Flow {
                 width: textCol.width
                 spacing: 6
-                visible: actionRepeater.count > 0
+                visible: card.pillCount > 0
 
                 Repeater {
                     id: actionRepeater
@@ -160,7 +160,14 @@ Item {
                     delegate: Rectangle {
                         id: pill
                         required property var modelData
-                        readonly property string label: pill.modelData ? String(pill.modelData.text || "") : ""
+
+                        readonly property string label: {
+                            if (!pill.modelData)
+                                return "";
+                            if (pill.modelData.identifier === "default")
+                                return I18n.t("notif.viewDetails");
+                            return String(pill.modelData.text || "");
+                        }
 
                         visible: label !== ""
                         implicitWidth: pillText.implicitWidth + 24

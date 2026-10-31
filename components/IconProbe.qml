@@ -29,6 +29,41 @@ Item {
         onTriggered: root.flushIconProbeQueue()
     }
 
+    property var _loginRetryWatch: []
+    Timer {
+        id: loginMissRetry
+        interval: 15000
+        repeat: false
+        running: true
+        onTriggered: {
+            const retry = {};
+            let n = 0;
+            for (const k in root.iconCache) {
+                const names = root.iconProbeNamesForKey(k);
+                if (root.iconCache[k] === "" && names !== undefined) {
+                    retry[k] = names;
+                    n++;
+                }
+            }
+
+            for (const k of root._iconProbePending) {
+                const names = root.iconProbeNamesForKey(k);
+                if (names !== undefined && root._loginRetryWatch.indexOf(k) < 0)
+                    root._loginRetryWatch.push(k);
+            }
+            if (n === 0 && root._loginRetryWatch.length === 0)
+                return;
+            console.log("[ICONPROBE] 登录 MISS 重试: " + n + " 个 key 重新探测, 观察 " + root._loginRetryWatch.length + " 个在途");
+            for (const k in retry)
+                delete root.iconCache[k];
+
+            for (const k in retry)
+                if (root._iconQueue[k] === undefined)
+                    root._iconQueue[k] = retry[k];
+            iconProbeFlush.restart();
+        }
+    }
+
     Process {
         id: iconProbeProc
         running: false
@@ -36,6 +71,17 @@ Item {
             waitForEnd: true
             onStreamFinished: root.iconProbeBatchDone(text)
         }
+    }
+
+    function iconProbeNamesForKey(key) {
+        try {
+            const names = JSON.parse(key);
+            if (Array.isArray(names) && names.length > 0)
+                return names;
+        } catch (e) {
+            console.warn("[ICONPROBE] 无法解析候选名 key: " + e);
+        }
+        return undefined;
     }
 
     function requestIconProbe(key, names) {
@@ -80,6 +126,21 @@ Item {
 
     function iconProbeBatchDone(text) {
         const stale = root._iconProbeBatchGen !== root._iconProbeGen;
+
+        const watchLanded = (key, missed) => {
+            const wi = root._loginRetryWatch.indexOf(key);
+            if (wi < 0)
+                return;
+            root._loginRetryWatch.splice(wi, 1);
+            if (missed) {
+                const names = root.iconProbeNamesForKey(key);
+                if (names !== undefined) {
+                    delete root.iconCache[key];
+                    root._iconQueue[key] = names;
+                    iconProbeFlush.restart();
+                }
+            }
+        };
         if (!stale) {
             for (const line of String(text).split("\n")) {
                 if (line === "")
@@ -95,9 +156,13 @@ Item {
             }
 
             for (const k of root._iconProbePending) {
-                if (root.iconCacheGet(k) === undefined)
+                const landed = root.iconCacheGet(k);
+                if (landed === undefined)
                     root.iconCacheSet(k, "");
+                watchLanded(k, landed === undefined || landed === "");
             }
+        } else {
+            root._loginRetryWatch = [];
         }
         root._iconProbePending = [];
         root.iconProbesFinished();

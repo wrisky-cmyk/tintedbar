@@ -70,6 +70,8 @@ Item {
         lockScreen.busy = false;
         lockScreen.unlocking = false;
         lockScreen.secureMisses = 0;
+
+        lockScreen.surfaceSeen = false;
         lockScreen.activePamConfig = lockScreen.pamConfig;
         lockScreen.locked = true;
         lockScreen.startPam();
@@ -304,9 +306,12 @@ Item {
                 return;
             }
 
+            if (result === PamResult.Error)
+                return;
             lockScreen.attempts++;
 
-            lockScreen.failText = pam.message !== "" ? pam.message : I18n.t("lock.failed");
+            if (lockScreen.failText === "")
+                lockScreen.failText = I18n.t("lock.failed");
             lockScreen.authFailed();
             lockScreen.startLockout();
             lockScreen.startPam();

@@ -38,18 +38,57 @@ Item {
     readonly property int entryCount: panel.center ? panel.center.history.length : 0
 
     property int selIndex: 0
+
+    property bool clearArmed: false
+
+    property int _lastCount: 0
+    property var _lastTopId: null
     readonly property bool clearSel: panel.selIndex === -1
 
-    onVisibleChanged: if (panel.visible)
-        panel.selIndex = 0
+    onVisibleChanged: {
+        if (panel.visible) {
+            panel.selIndex = 0;
+            panel._lastCount = panel.entryCount;
+            panel._lastTopId = panel.topEntryId();
+        } else {
+            panel.clearArmed = false;
+        }
+    }
 
-    onEntryCountChanged: {
-        if (panel.entryCount === 0) {
+    function topEntryId() {
+        const h = panel.center ? panel.center.history : null;
+        return h && h.length > 0 && h[0] ? h[0].id : null;
+    }
+
+    function syncHistoryState() {
+        const count = panel.entryCount;
+        const topId = panel.topEntryId();
+        if (panel.visible) {
+            const grew = count > panel._lastCount;
+            const headReplaced = count === panel._lastCount && count > 0 && topId !== panel._lastTopId;
+
+            if (grew || headReplaced) {
+                const delta = grew ? count - panel._lastCount : 1;
+                if (panel.selIndex >= 0)
+                    panel.selIndex += delta;
+                list.contentY = 0;
+            }
+        }
+        panel._lastCount = count;
+        panel._lastTopId = topId;
+        if (count === 0) {
             panel.selIndex = 0;
             return;
         }
-        if (panel.selIndex >= panel.entryCount)
-            panel.selIndex = Math.max(0, panel.entryCount - 1);
+        if (panel.selIndex >= count)
+            panel.selIndex = Math.max(0, count - 1);
+    }
+
+    Connections {
+        target: panel.center
+        function onHistoryChanged() {
+            panel.syncHistoryState();
+        }
     }
 
     function moveSel(d) {
@@ -81,6 +120,13 @@ Item {
         if (!panel.center)
             return;
         if (panel.clearSel) {
+            if (!panel.clearArmed) {
+                panel.clearArmed = true;
+                clearArmReset.restart();
+                return;
+            }
+            panel.clearArmed = false;
+            clearArmReset.stop();
             panel.center.clearAll();
             return;
         }
@@ -148,8 +194,8 @@ Item {
                     anchors.right: closeBtn.left
                     anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
-                    text: I18n.t("notif.clearAll")
-                    color: clearMouse.containsMouse ? Style.text1 : Style.text3
+                    text: panel.clearArmed ? I18n.t("notif.clearConfirm") : I18n.t("notif.clearAll")
+                    color: clearMouse.containsMouse ? (panel.clearArmed ? Style.privacyRed : Style.text1) : Style.text3
                     font.family: Style.cjk
                     font.pixelSize: 13
                     visible: panel.entryCount > 0
@@ -168,9 +214,25 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: if (panel.center)
-                            panel.center.clearAll()
+                        onClicked: {
+                            if (!panel.center)
+                                return;
+                            if (!panel.clearArmed) {
+                                panel.clearArmed = true;
+                                clearArmReset.restart();
+                                return;
+                            }
+                            panel.clearArmed = false;
+                            clearArmReset.stop();
+                            panel.center.clearAll();
+                        }
                     }
+                }
+
+                Timer {
+                    id: clearArmReset
+                    interval: 2000
+                    onTriggered: panel.clearArmed = false
                 }
 
                 Text {
@@ -268,13 +330,22 @@ Item {
                             Text {
                                 id: rowTime
                                 anchors.right: parent.right
-                                anchors.rightMargin: rowMouse.containsMouse ? 30 : 10
+                                anchors.rightMargin: 10
                                 anchors.top: parent.top
                                 anchors.topMargin: 9
-                                text: row.modelData ? Qt.formatTime(new Date(row.modelData.time), "HH:mm") : ""
+
+                                text: {
+                                    if (!row.modelData)
+                                        return "";
+                                    const d = new Date(row.modelData.time);
+                                    const now = new Date();
+                                    return (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) ? Qt.formatTime(d, "HH:mm") : Qt.formatDateTime(d, "MM-dd");
+                                }
                                 color: Style.text3
                                 font.family: Style.nerd
                                 font.pixelSize: 12
+
+                                opacity: rowMouse.containsMouse ? 0 : 1
                             }
 
                             Text {
@@ -285,8 +356,13 @@ Item {
                                 anchors.topMargin: 9
                                 z: 1
                                 text: "✕"
-                                visible: rowMouse.containsMouse
-                                color: rowRemoveMouse.containsMouse ? Style.privacyRed : Style.text3
+                                opacity: rowMouse.containsMouse ? 1 : 0
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: 120
+                                    }
+                                }
+                                color: rowMouse.containsMouse ? Style.privacyRed : Style.text3
                                 font.family: Style.cjk
                                 font.pixelSize: 13
 
@@ -294,7 +370,8 @@ Item {
                                     id: rowRemoveMouse
                                     anchors.fill: parent
                                     anchors.margins: -6
-                                    hoverEnabled: true
+                                    hoverEnabled: false
+                                    enabled: rowMouse.containsMouse
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: if (panel.center)
                                         panel.center.removeEntry(row.modelData.id)
@@ -383,7 +460,8 @@ Item {
             radius: 1.5
             color: Style.text3
             opacity: 0.45
-            height: Math.max(24, list.height * list.height / entries.implicitHeight)
+
+            height: entries.implicitHeight > 0 ? Math.max(24, list.height * list.height / entries.implicitHeight) : 24
             y: layout.y + list.y + (list.height - height) * list.contentY / Math.max(1, entries.implicitHeight - list.height)
         }
     }

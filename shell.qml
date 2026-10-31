@@ -694,6 +694,7 @@ ShellRoot {
                 history: notifCenter.history.length,
                 historyLimit: notifCenter.historyLimit,
                 unread: notifCenter.hasUnread,
+                dnd: notifCenter.dnd,
                 panel: notifCenter.panelOpen
             });
         }

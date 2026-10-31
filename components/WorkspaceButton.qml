@@ -42,6 +42,9 @@ Item {
     function refresh() {
         if (!wsBtn.niri)
             wsBtn.ws = Compositor.workspaceForId(wsBtn.wsId);
+        if (Style.debug && !wsBtn.niri && !wsBtn.ws) {
+            console.log("[WSBTN]", wsBtn.wsId, "workspace 未找到; model=", Compositor.workspacesDump());
+        }
         wsBtn.syncWindows();
         if (Style.debug && !wsBtn.niri && wsBtn.ws) {
             console.log("[WSBTN]", wsBtn.wsId, "found, toplevels=" + Compositor.modelValues(wsBtn.ws.toplevels).length);
@@ -199,7 +202,8 @@ Item {
             "pin": true,
             "togglegroup": true,
             "moveintogroup": true,
-            "moveoutofgroup": true
+            "moveoutofgroup": true,
+            "changeworkspaceid": true
         })
 
     property bool refreshQueued: false
