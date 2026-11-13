@@ -30,13 +30,16 @@ printf 'auth include login\n' | sudo tee /etc/pam.d/quickshell-lock
 - **被锁在门外时**：切换到 TTY（`Ctrl+Alt+F2`）登录，或从另一台机器 SSH 进来。`login` 认证栈
   带有 `pam_faillock`（默认连续输错 3 次锁定 10 分钟），等待冷却或走 TTY 均可。
 - 回退方案：系统中若还保留 hyprlock，这份配置无法启动时可直接运行 `hyprlock` 应急。
+- 锁屏未能真正锁上（PAM 放行的极少数情况）时会先发出一条系统通知告知，不会无提示地停留在
+  未锁状态。
 
 ## 授权弹窗（polkit）
 
 由 quickshell 自己充当 polkit agent（替代 hyprpolkitagent）。触发条件不变：`pkexec`、安装软件包、
 修改系统设置等需要权限的操作会弹出“需要授权”卡片；输入**登录密码**，Enter 提交 / Esc 取消。
-认证使用系统的 `/usr/lib/pam.d/polkit-1`，与其他 agent 一致，因此同样受 `pam_faillock` 管理：
-连续输错 3 次锁定 10 分钟，期间卡片会直接显示剩余分钟数。
+连续输错会先进入界面层的递增等待：第 3 次失败起每次等待时间翻倍（1 秒起、16 秒封顶，卡片上
+显示倒计时）。认证使用系统的 `/usr/lib/pam.d/polkit-1`，与其他 agent 一致，因此同样受
+`pam_faillock` 管理：连续输错 3 次锁定 10 分钟，期间卡片会直接显示剩余分钟数。
 
 - 锁屏期间**不弹窗**（密码框不会压到锁屏界面上），解锁后会弹。
 - 多屏时，弹窗出现在**触发那一刻的聚焦屏**。

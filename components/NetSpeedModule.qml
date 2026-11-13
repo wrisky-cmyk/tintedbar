@@ -41,11 +41,15 @@ Module {
         return ("00" + n).slice(-3) + u;
     }
 
+    function isVirtualIface(name) {
+        return /^(veth|docker|virbr|vnet|podman|cni|cali|flannel|vxlan|br[-0-9])/.test(String(name));
+    }
+
     function refreshSpeed(text) {
         let rx = 0, tx = 0, seen = 0;
         for (const l of String(text).split("\n").slice(2)) {
             const f = l.trim().split(/[:\s]+/);
-            if (f.length < 10 || f[0] === "" || f[0] === "lo")
+            if (f.length < 10 || f[0] === "" || f[0] === "lo" || netSpeedModule.isVirtualIface(f[0]))
                 continue;
             rx += +f[1] || 0;
             tx += +f[9] || 0;

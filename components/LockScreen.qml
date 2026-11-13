@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.Pam
 import Quickshell.Wayland
 import "."
@@ -7,7 +8,24 @@ import "."
 Item {
     id: lockScreen
 
-    property string userName: Quickshell.env("USER") || ""
+    property string userName: Quickshell.env("USER") || Quickshell.env("LOGNAME") || ""
+    Process {
+        id: userNameFallback
+        running: lockScreen.userName === ""
+        command: ["id", "-un"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const v = String(text).trim();
+                if (v !== "" && lockScreen.userName === "")
+                    lockScreen.userName = v;
+            }
+        }
+    }
+
+    onUserNameChanged: {
+        if (lockScreen.locked && lockScreen.userName !== "" && !pam.active)
+            lockScreen.startPam();
+    }
 
     property string pamConfig: "quickshell-lock"
 
@@ -20,6 +38,8 @@ Item {
     property int idleLockMinutes: 5
 
     property int idleDpmsMinutes: 10
+
+    property bool idleSuppressed: false
 
     property bool dpmsOffByUs: false
 
@@ -35,6 +55,7 @@ Item {
 
     property int attempts: 0
     property bool pamReady: false
+
     property bool busy: false
     property bool unlocking: false
     property string failText: ""
@@ -72,6 +93,8 @@ Item {
         lockScreen.secureMisses = 0;
 
         lockScreen.surfaceSeen = false;
+
+        lockScreen.capsOn = false;
         lockScreen.activePamConfig = lockScreen.pamConfig;
         lockScreen.locked = true;
         lockScreen.startPam();
@@ -95,6 +118,9 @@ Item {
 
     function startPam(watchdogInterval) {
         lockScreen.pamReady = false;
+
+        if (lockScreen.userName === "")
+            return;
         if (pam.active)
             pam.abort();
 
@@ -134,8 +160,6 @@ Item {
     }
 
     function screenOff() {
-        if (lockScreen.dpmsOffByUs)
-            return;
         lockScreen.dpmsOffByUs = true;
         console.log("[DPMS] idle " + lockScreen.idleDpmsMinutes + " min, dpms off(" + Style.compositor + ", locked=" + lockScreen.locked + ")");
         Compositor.setDpms(false);
@@ -145,6 +169,40 @@ Item {
         console.log("[DPMS] activity, dpms on(" + Style.compositor + ", prev=" + (lockScreen.dpmsOffByUs ? "off by us" : "not by us") + ")");
         lockScreen.dpmsOffByUs = false;
         Compositor.setDpms(true);
+    }
+
+    Timer {
+        id: startupDpmsCheck
+        interval: 1500
+        running: true
+        onTriggered: {
+            if (Style.compositor === "niri") {
+                Compositor.setDpms(true);
+                return;
+            }
+            dpmsProbe.running = true;
+        }
+    }
+    Process {
+        id: dpmsProbe
+        running: false
+        command: ["sh", "-c", "hyprctl -j monitors"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const ms = JSON.parse(text);
+                    for (let i = 0; i < ms.length; i++) {
+                        if (ms[i] && ms[i].dpmsStatus === false) {
+                            console.log("[DPMS] startup probe: screen was off, waking");
+                            lockScreen.screenOn();
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.log("[DPMS] startup probe failed: " + e);
+                }
+            }
+        }
     }
 
     component IdleWatcher: Loader {
@@ -176,7 +234,7 @@ Item {
     }
 
     IdleWatcher {
-        minutes: lockScreen.locked ? 0 : lockScreen.idleLockMinutes
+        minutes: lockScreen.locked || lockScreen.idleSuppressed ? 0 : lockScreen.idleLockMinutes
         onIdle: () => {
             console.log("[LOCK] idle " + lockScreen.idleLockMinutes + " min, auto lock");
             lockScreen.lockNow();
@@ -184,32 +242,15 @@ Item {
     }
 
     IdleWatcher {
-        minutes: lockScreen.idleDpmsMinutes
+        minutes: !lockScreen.locked && lockScreen.idleSuppressed && !lockScreen.dpmsOffByUs ? 0 : lockScreen.idleDpmsMinutes
         onIdle: () => lockScreen.screenOff()
         onResume: () => lockScreen.screenOn()
     }
 
-    Poller {
+    CapsPoller {
+        id: lockCaps
         active: lockScreen.locked
-        interval: 3000
-        command: ["sh", "-c", "v=; for f in /sys/class/leds/*::capslock/brightness; do " + "[ -e \"$f\" ] || break; read -r v < \"$f\"; break; done; " + "if [ -n \"$v\" ]; then printf 'led %s\\n' \"$v\"; " + (Style.compositor === "niri" ? "else printf 'led 0\\n'; fi" : "else exec hyprctl devices -j; fi")]
-        onOutput: text => {
-            const t = String(text).trim();
-
-            if (t.indexOf("led ") === 0) {
-                lockScreen.capsOn = t.split(/\s+/)[1] === "1";
-                return;
-            }
-
-            try {
-                const d = JSON.parse(t);
-                let caps = false;
-                for (const k of (d.keyboards || []))
-                    if (k.capsLock === true)
-                        caps = true;
-                lockScreen.capsOn = caps;
-            } catch (e) {}
-        }
+        onCapsOnChanged: lockScreen.capsOn = capsOn
     }
 
     WlSessionLock {
@@ -249,6 +290,21 @@ Item {
     }
 
     Timer {
+        id: pamBusyWatchdog
+        interval: 45000
+        running: lockScreen.locked
+        repeat: true
+        onTriggered: {
+            if (!lockScreen.busy)
+                return;
+            console.log("[LOCK] pam conversation stuck >45s, abort + restart");
+            lockScreen.busy = false;
+            pam.abort();
+            lockScreen.startPam();
+        }
+    }
+
+    Timer {
         id: pamStartWatchdog
         interval: 2000
         onTriggered: {
@@ -266,14 +322,21 @@ Item {
         }
     }
 
+    property bool secureStayLogged: false
     Timer {
         id: secureCheck
         interval: 5000
         onTriggered: {
-            if (!lockScreen.locked || lock.secure)
+            if (!lockScreen.locked || lock.secure) {
+                lockScreen.secureStayLogged = false;
                 return;
+            }
             if (lockScreen.surfaceSeen) {
-                console.log("[LOCK] secure=false but lock surface exists, staying locked");
+                if (!lockScreen.secureStayLogged) {
+                    lockScreen.secureStayLogged = true;
+                    console.log("[LOCK] secure=false but lock surface exists, staying locked (rechecking)");
+                }
+                restart();
                 return;
             }
             if (++lockScreen.secureMisses < 3) {
@@ -281,6 +344,8 @@ Item {
                 return;
             }
             console.log("[LOCK] compositor lacks ext-session-lock (no lock surface in 15s), abandoning this lock");
+
+            Quickshell.execDetached(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", I18n.t("lock.abandon"), I18n.t("lock.abandonBody"), "[]", "{\"urgency\": <byte 2>}", 10000]);
             lockScreen.unlockNow();
         }
     }
@@ -327,7 +392,8 @@ Item {
                 lockScreen.startPam();
                 return;
             }
-            lockScreen.failText = PamError.toString(error);
+
+            lockScreen.failText = error === PamError.StartFailed ? I18n.t("lock.pamUnavailable") : PamError.toString(error);
             lockScreen.authFailed();
 
             if (error === PamError.StartFailed)
@@ -364,7 +430,8 @@ Item {
                     return surf.width > 0 ? surf.width : 1920;
                 }
                 fillMode: Image.PreserveAspectCrop
-                asynchronous: false
+
+                asynchronous: true
                 cache: false
                 visible: status === Image.Ready
             }
@@ -529,6 +596,8 @@ Item {
 
                     Text {
                         id: statusLabel
+
+                        textFormat: Text.PlainText
                         text: {
                             if (lockScreen.failText === "")
                                 return I18n.t("lock.hint");

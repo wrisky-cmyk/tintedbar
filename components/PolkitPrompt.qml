@@ -22,6 +22,10 @@ OverlayPanel {
     readonly property bool submitted: prompt.flow !== null && !prompt.flow.isResponseRequired && !prompt.flow.isCompleted
     property bool capsOn: false
 
+    property int attempts: 0
+    property double lockoutUntil: 0
+    property string lockoutText: ""
+
     readonly property string errorText: {
         const f = prompt.flow;
         if (!f)
@@ -41,6 +45,18 @@ OverlayPanel {
         return String(f.supplementaryMessage || "");
     }
 
+    function startLockout() {
+        if (prompt.attempts < 3)
+            return;
+        const secs = Math.min(Math.pow(2, prompt.attempts - 3), 16);
+        prompt.lockoutUntil = Date.now() + secs * 1000;
+
+        prompt.lockoutText = I18n.fill(I18n.t("lock.retry"), {
+            n: secs
+        });
+        lockoutTimer.restart();
+    }
+
     function submit() {
         const f = prompt.flow;
         if (!f || prompt.submitted || field.text === "") {
@@ -49,9 +65,36 @@ OverlayPanel {
             return;
         }
         const v = field.text;
+        if (Date.now() < prompt.lockoutUntil)
+            return;
         field.text = "";
         console.log("[POLKIT] submit() submitted");
         f.submit(v);
+    }
+
+    onFlowChanged: {
+        prompt.attempts = 0;
+        prompt.lockoutUntil = 0;
+        prompt.lockoutText = "";
+        lockoutTimer.stop();
+    }
+
+    Timer {
+        id: lockoutTimer
+        interval: 1000
+        repeat: true
+        running: false
+        onTriggered: {
+            const left = Math.ceil((prompt.lockoutUntil - Date.now()) / 1000);
+            if (left > 0) {
+                prompt.lockoutText = I18n.fill(I18n.t("lock.retry"), {
+                    n: left
+                });
+                return;
+            }
+            stop();
+            prompt.lockoutText = "";
+        }
     }
 
     function cancel() {
@@ -76,6 +119,8 @@ OverlayPanel {
         }
 
         function onAuthenticationFailed() {
+            prompt.attempts++;
+            prompt.startLockout();
             console.log("[POLKIT] this round failed (pam reopened a round, can retry)");
         }
 
@@ -88,25 +133,9 @@ OverlayPanel {
         }
     }
 
-    Poller {
+    CapsPoller {
         active: prompt.shown
-        interval: 3000
-        command: ["sh", "-c", "v=; for f in /sys/class/leds/*::capslock/brightness; do " + "[ -e \"$f\" ] || break; read -r v < \"$f\"; break; done; " + "if [ -n \"$v\" ]; then printf 'led %s\\n' \"$v\"; " + (Style.compositor === "niri" ? "else printf 'led 0\\n'; fi" : "else exec hyprctl devices -j; fi")]
-        onOutput: text => {
-            const t = String(text).trim();
-            if (t.indexOf("led ") === 0) {
-                prompt.capsOn = t.split(/\s+/)[1] === "1";
-                return;
-            }
-            try {
-                const d = JSON.parse(t);
-                let caps = false;
-                for (const k of (d.keyboards || []))
-                    if (k.capsLock === true)
-                        caps = true;
-                prompt.capsOn = caps;
-            } catch (e) {}
-        }
+        onCapsOnChanged: prompt.capsOn = capsOn
     }
 
     Rectangle {
@@ -183,6 +212,8 @@ OverlayPanel {
 
             Text {
                 width: parent.width
+
+                textFormat: Text.PlainText
                 text: prompt.flow ? String(prompt.flow.message) : ""
                 color: Style.text2
                 font.family: Style.cjk
@@ -263,10 +294,11 @@ OverlayPanel {
 
                         width: statusRow.width
                         elide: Text.ElideRight
+                        textFormat: Text.PlainText
                         anchors.verticalCenter: parent.verticalCenter
 
-                        text: prompt.submitted ? I18n.t("polkit.verifying") : (prompt.errorText !== "" ? prompt.errorText : (prompt.infoText !== "" ? prompt.infoText : I18n.t("polkit.hint")))
-                        color: prompt.submitted ? Style.text2 : (prompt.errorText !== "" ? Style.danger : (prompt.infoText !== "" ? Style.text2 : Style.text3))
+                        text: prompt.submitted ? I18n.t("polkit.verifying") : (prompt.lockoutText !== "" ? prompt.lockoutText : (prompt.errorText !== "" ? prompt.errorText : (prompt.infoText !== "" ? prompt.infoText : I18n.t("polkit.hint"))))
+                        color: prompt.submitted ? Style.text2 : (prompt.lockoutText !== "" ? Style.danger : (prompt.errorText !== "" ? Style.danger : (prompt.infoText !== "" ? Style.text2 : Style.text3)))
                         font.family: Style.cjk
                         font.pixelSize: 12
                     }

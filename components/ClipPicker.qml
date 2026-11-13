@@ -7,6 +7,8 @@ import "."
 OverlayPanel {
     id: picker
 
+    required property var qsRoot
+
     property string query: ""
 
     property bool clearArmed: false
@@ -169,7 +171,10 @@ OverlayPanel {
         command: ["cliphist", "wipe"]
 
         onExited: exitCode => {
-            clipsLoad.running = true;
+            if (clipsLoad.running)
+                wipePendingReload = true;
+            else
+                clipsLoad.running = true;
         }
     }
 
@@ -201,6 +206,7 @@ OverlayPanel {
         Keys.onLeftPressed: picker.adjustSel(-1)
         Keys.onRightPressed: picker.adjustSel(1)
         Keys.onReturnPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
+        Keys.onEnterPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
 
         Column {
             anchors.fill: parent
@@ -238,6 +244,7 @@ OverlayPanel {
                         Keys.onUpPressed: picker.selUp()
                         Keys.onDownPressed: picker.selDown()
                         Keys.onReturnPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
+                        Keys.onEnterPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
                         Text {
                             anchors.fill: parent
                             visible: input.text === ""

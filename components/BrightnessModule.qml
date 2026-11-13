@@ -42,6 +42,8 @@ Module {
     readonly property bool ddcBusy: brightnessRead.running || brightnessWrite.running
 
     function stepPct(d, how) {
+        if (brightnessModule.pct < 0)
+            return;
         brightnessModule.setPct(brightnessModule.pct + d, how);
     }
 
@@ -187,7 +189,9 @@ Module {
                     }
                     brightnessModule.sysfsDev = lines[0];
                     brightnessModule.maxVal = max;
-                    brightnessModule.pct = Math.round(cur / max * 100);
+
+                    if (brightnessModule.pendingPct < 0)
+                        brightnessModule.pct = Math.round(cur / max * 100);
                 } else {
                     const vcp = lines.find(s => s.indexOf("VCP 10") === 0);
                     if (vcp === undefined) {
@@ -213,7 +217,9 @@ Module {
                         return;
                     brightnessModule.ddcEverOk = true;
                     brightnessModule.busFallbackTried = false;
-                    brightnessModule.pct = Math.round(cur / max * 100);
+
+                    if (brightnessModule.pendingPct < 0)
+                        brightnessModule.pct = Math.round(cur / max * 100);
                 }
                 brightnessModule.flushPending();
             }

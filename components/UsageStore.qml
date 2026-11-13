@@ -46,6 +46,8 @@ Item {
     Process {
         id: usageSave
         running: false
+        onExited: if (exitCode !== 0)
+            console.warn("[USAGE] usage save failed rc=" + exitCode)
     }
 
     Timer {

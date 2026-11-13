@@ -24,11 +24,21 @@ Item {
 
     property bool stale: false
 
+    property double fetchedAt: 0
+
     property string _requestUrl: ""
 
     readonly property bool ok: wx.current !== null
 
     readonly property bool ready: wx.enabled && wx.located && wx.ok
+
+    readonly property bool refreshing: weatherPoller.running
+
+    function refresh() {
+        if (!wx.enabled || !wx.located)
+            return false;
+        return weatherPoller.kickAfterExit();
+    }
 
     readonly property int refreshMs: 30 * 60 * 1000
 
@@ -71,6 +81,7 @@ Item {
             return;
         }
         wx.stale = false;
+        wx.fetchedAt = Date.now();
         wx.cacheSave(obj);
     }
 
@@ -113,7 +124,8 @@ Item {
             const dmax = wx.num(maxs[i]);
             const dmin = wx.num(mins[i]);
             const date = (time[i] === null || time[i] === undefined) ? "" : String(time[i]);
-            if (date === "" || !isFinite(dc) || !isFinite(dmax) || !isFinite(dmin))
+
+            if (date === "" || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !isFinite(dc) || !isFinite(dmax) || !isFinite(dmin))
                 return false;
             out.push({
                 date: date,
@@ -128,16 +140,28 @@ Item {
     }
 
     function cacheSave(payload) {
+        if (cacheWrite.running) {
+            wx.cachePending = payload;
+            return;
+        }
         cacheWrite.command = ["sh", "-c", Style.atomicWriteCmd(wx.cachePath, JSON.stringify({
                 at: Date.now(),
                 data: payload
             }))];
         cacheWrite.running = true;
     }
+    property var cachePending: null
 
     Process {
         id: cacheWrite
         running: false
+        onExited: {
+            if (wx.cachePending === null)
+                return;
+            const p = wx.cachePending;
+            wx.cachePending = null;
+            wx.cacheSave(p);
+        }
     }
 
     Process {
@@ -160,6 +184,9 @@ Item {
                     return;
                 if (saved.at && (Date.now() - saved.at) > wx.staleAfterMs)
                     wx.stale = true;
+
+                if (saved.at)
+                    wx.fetchedAt = Number(saved.at);
             }
         }
     }

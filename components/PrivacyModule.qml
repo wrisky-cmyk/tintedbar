@@ -125,6 +125,21 @@ Module {
         if (!same)
             privacyModule.activeMicSources = found;
     }
+
+    function isScreenShareStream(n) {
+        if (!n)
+            return false;
+        const t = Number(n.type);
+        if ((t & 4) === 0 || (t & 2) === 0)
+            return false;
+        const p = n.properties || {};
+        const role = String(p["media.role"] || "").toLowerCase();
+        const name = String(p["node.name"] || p["application.name"] || "").toLowerCase();
+
+        if (role.indexOf("screen") < 0 && role.indexOf("monitor") < 0 && name.indexOf("screen") < 0 && name.indexOf("monitor") < 0)
+            return false;
+        return role.indexOf("camera") < 0 && name.indexOf("camera") < 0;
+    }
     function refreshPrivacy() {
         let mic = false, share = false;
         const nodes = Style.modelValues(Pipewire.nodes);
@@ -132,10 +147,9 @@ Module {
             if (!n)
                 continue;
 
-            const t = Number(n.type);
             if (privacyModule.isUserMicStream(n))
                 mic = true;
-            if ((t & 4) && (t & 2))
+            if (privacyModule.isScreenShareStream(n))
                 share = true;
         }
         privacyModule.micActive = mic;
@@ -285,7 +299,10 @@ Module {
                     while (Math.abs(micCard.wheelAccum) >= 120) {
                         const dir = micCard.wheelAccum > 0 ? 1 : -1;
                         micCard.wheelAccum -= dir * 120;
-                        privacyModule.applyMicVol(micCard.shownPct + dir * 5, "wheel");
+
+                        const a = privacyModule.sourceAudio;
+                        const base = a ? Math.round((Number(a.volume) || 0) * 100) : 0;
+                        privacyModule.applyMicVol(base + dir * 5, "wheel");
                     }
                 }
                 onPressed: m => {

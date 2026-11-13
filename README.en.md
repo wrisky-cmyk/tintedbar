@@ -50,7 +50,7 @@ There is no persistent Python/Node process, and it uses the network only for wea
 | `notify-send` (libnotify) | Notification action for the reboot prompt; the icon remains clickable but shows no details without it |
 | `systemctl` / `loginctl` | Power-menu shutdown / reboot / suspend / logout |
 | `nm-applet` / `blueman-manager` / `pavucontrol` | Panels opened by the network / Bluetooth / volume icons |
-| `$TERMINAL` (fallback `alacritty`) | Terminal button and `top` from temperature / disk / CPU / memory |
+| `$TERMINAL` (fallback `alacritty`, may include arguments like `"myterm --hold"`) | Terminal button and `top` from temperature / disk / CPU / memory |
 
 **No need to install**: playerctl / pactl / wpctl / brightnessctl / grim / jq / python / Node.
 Media uses MPRIS (D-Bus), volume uses the PipeWire service, network speed comes from `/proc`, and

@@ -22,8 +22,9 @@ if ! cur=$(gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null); 
 fi
 
 mode=
+force=0
 case "${1:-}" in
-  --force) case "${2:-}" in
+  --force) force=1; case "${2:-}" in
              dark)  mode=dark ;;
              light) mode=light ;;
              *) echo "usage: $0 [--force dark|light] | [--mode]" >&2; exit 1 ;;
@@ -65,7 +66,7 @@ set_prefer_dark() {
 set_prefer_dark "$cfg/gtk-3.0/settings.ini"
 set_prefer_dark "$cfg/gtk-4.0/settings.ini"
 
-if [ -n "$bit4" ] || [ -n "$bit3" ]; then
+if [ -n "$bit4" ] || [ -n "$bit3" ] || [ "$force" = 1 ]; then
   want="'prefer-dark'"; [ "$mode" = light ] && want="'prefer-light'"
   if [ "$cur" != "$want" ] && { [ "$cur" = "'prefer-dark'" ] || [ "$cur" = "'prefer-light'" ]; }; then
 
@@ -82,7 +83,10 @@ if ! th=$(gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null); then
 fi
 th=${th#\'}; th=${th%\'}
 case "$th" in
-  ""|/*|*/*|*..*|.*) exit 0 ;;
+  ""|/*|*/*|*..*|.*)
+
+    echo "theme-apply: refusing unsafe theme name: $th" >&2
+    exit 0 ;;
 esac
 theme_dir=""
 for d in "$HOME/.local/share/themes" /usr/share/themes; do
@@ -98,7 +102,7 @@ thj=$(printf '%s' "$th" | tr -d '"\\')
 if mkdir -p "$st" && tmp=$(mktemp "$st/theme-palette.XXXXXX"); then
 
   if printf '{"family":"%s","accent":"%s"}\n' "$thj" "$acc" >"$tmp"; then
-    mv -f "$tmp" "$st/theme-palette.json"
+    mv -f "$tmp" "$st/theme-palette.json" || rm -f "$tmp"
   else
     rm -f "$tmp"
   fi
@@ -128,7 +132,7 @@ if [ -f "$theme_dir/gtk-4.0/gtk.css" ]; then
   fi
   if cp -- "$theme_dir/gtk-4.0/$variant" "$tmp"; then
     chmod 0644 "$tmp"
-    mv -f "$tmp" "$dst"
+    mv -f "$tmp" "$dst" || rm -f "$tmp"
   else
     rm -f "$tmp"
   fi

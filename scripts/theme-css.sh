@@ -90,3 +90,7 @@ for k in "${!defs[@]}"; do
       printf '%s=%s\n' "$k" "$v" ;;
   esac
 done
+
+if [ -n "${2:-}" ]; then printf '#CSSGEN %s\n' "$2"; fi
+
+exit 0

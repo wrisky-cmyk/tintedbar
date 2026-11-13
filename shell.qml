@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
@@ -35,6 +36,7 @@ ShellRoot {
     property bool showLanguage: false
     property bool showPrivacy: true
     property bool showClips: false
+    property bool showPomodoro: true
 
     property bool showBattery: Style.laptopBattery() !== null
     property bool showNetIface: false
@@ -51,6 +53,11 @@ ShellRoot {
     property bool showReboot: false
 
     property bool showBrightness: false
+
+    property int pomodoroFocusMin: 25
+    property int pomodoroBreakMin: 5
+    property int pomodoroLongMin: 15
+    property int pomodoroLongEvery: 4
     property int idleLockMinutes: 5
     property int idleDpmsMinutes: 10
 
@@ -59,6 +66,8 @@ ShellRoot {
     property bool fullscreenDnd: true
 
     property bool fullscreenIdleInhibit: false
+
+    property bool launcherEmptyWs: true
 
     property var launcherByScreen: ({})
     property var clipsByScreen: ({})
@@ -165,6 +174,11 @@ ShellRoot {
             group: "display"
         },
         {
+            key: "launcherEmptyWs",
+            labelKey: "flag.launcherEmptyWs",
+            group: "display"
+        },
+        {
             key: "showTerminal",
             labelKey: "flag.showTerminal",
             group: "module"
@@ -260,6 +274,11 @@ ShellRoot {
             group: "module"
         },
         {
+            key: "showPomodoro",
+            labelKey: "flag.showPomodoro",
+            group: "module"
+        },
+        {
             key: "fullscreenDnd",
             labelKey: "flag.fullscreenDnd",
             group: "notif"
@@ -307,6 +326,10 @@ ShellRoot {
         o.clipMaxEntries = qsRoot.clipMaxEntries;
         o.idleLockMinutes = qsRoot.idleLockMinutes;
         o.idleDpmsMinutes = qsRoot.idleDpmsMinutes;
+        o.pomodoroFocusMin = qsRoot.pomodoroFocusMin;
+        o.pomodoroBreakMin = qsRoot.pomodoroBreakMin;
+        o.pomodoroLongMin = qsRoot.pomodoroLongMin;
+        o.pomodoroLongEvery = qsRoot.pomodoroLongEvery;
         o.idleInhibited = qsRoot.idleInhibited;
         o.dnd = notifCenter.dnd;
         o.lang = I18n.lang;
@@ -345,6 +368,34 @@ ShellRoot {
         if (v === qsRoot.idleLockMinutes)
             return;
         qsRoot.idleLockMinutes = v;
+        qsRoot.saveBarSettings();
+    }
+    function setPomodoroFocusMin(v) {
+        v = Math.max(1, Math.min(60, Math.round(v)));
+        if (v === qsRoot.pomodoroFocusMin)
+            return;
+        qsRoot.pomodoroFocusMin = v;
+        qsRoot.saveBarSettings();
+    }
+    function setPomodoroBreakMin(v) {
+        v = Math.max(1, Math.min(30, Math.round(v)));
+        if (v === qsRoot.pomodoroBreakMin)
+            return;
+        qsRoot.pomodoroBreakMin = v;
+        qsRoot.saveBarSettings();
+    }
+    function setPomodoroLongMin(v) {
+        v = Math.max(5, Math.min(45, Math.round(v / 5) * 5));
+        if (v === qsRoot.pomodoroLongMin)
+            return;
+        qsRoot.pomodoroLongMin = v;
+        qsRoot.saveBarSettings();
+    }
+    function setPomodoroLongEvery(v) {
+        v = Math.max(2, Math.min(8, Math.round(v)));
+        if (v === qsRoot.pomodoroLongEvery)
+            return;
+        qsRoot.pomodoroLongEvery = v;
         qsRoot.saveBarSettings();
     }
 
@@ -447,8 +498,9 @@ ShellRoot {
                     saved = {};
 
                 const num = v => {
-                    const n = Number(v);
-                    return isFinite(n) ? n : null;
+                    if (typeof v !== "number")
+                        return null;
+                    return isFinite(v) ? v : null;
                 };
                 for (const k of qsRoot.showFlags)
                     if (saved[k] !== undefined)
@@ -468,6 +520,18 @@ ShellRoot {
                 const idm = num(saved.idleDpmsMinutes);
                 if (idm !== null)
                     qsRoot.idleDpmsMinutes = Math.max(0, Math.min(60, idm));
+                const pfm = num(saved.pomodoroFocusMin);
+                if (pfm !== null)
+                    qsRoot.pomodoroFocusMin = Math.max(1, Math.min(60, pfm));
+                const pbm = num(saved.pomodoroBreakMin);
+                if (pbm !== null)
+                    qsRoot.pomodoroBreakMin = Math.max(1, Math.min(30, pbm));
+                const plm = num(saved.pomodoroLongMin);
+                if (plm !== null)
+                    qsRoot.pomodoroLongMin = Math.max(5, Math.min(45, plm));
+                const ppp = num(saved.pomodoroLongEvery);
+                if (ppp !== null)
+                    qsRoot.pomodoroLongEvery = Math.max(2, Math.min(8, ppp));
                 if (saved.idleInhibited !== undefined)
                     qsRoot.idleInhibited = saved.idleInhibited === true;
 
@@ -628,6 +692,12 @@ ShellRoot {
     IpcHandler {
         target: "weather"
 
+        function open(): void {
+            const l = qsRoot.panelForFocused(qsRoot.weatherPopupByScreen);
+            if (l) {
+                l.open();
+            }
+        }
         function toggle(): void {
             const l = qsRoot.panelForFocused(qsRoot.weatherPopupByScreen);
             if (l) {
@@ -1046,6 +1116,8 @@ ShellRoot {
         id: lockScreen
         idleLockMinutes: qsRoot.idleLockMinutes
         idleDpmsMinutes: qsRoot.idleDpmsMinutes
+
+        idleSuppressed: qsRoot.idleInhibited || (qsRoot.fullscreenIdleInhibit && Compositor.fullscreenActive)
     }
 
     PolkitAgent {
@@ -1188,14 +1260,130 @@ ShellRoot {
 
                         Row {
                             id: workspacesRow
+                            objectName: "workspacesRow"
                             anchors.centerIn: parent
                             spacing: 4
 
                             Repeater {
-                                model: 10
+
+                                model: Compositor.stripCount(screenRoot.screenKey)
                                 delegate: WorkspaceButton {
                                     wsId: index + 1
                                     outputName: screenRoot.screenKey
+                                    dragHost: dragHostRef
+                                }
+                            }
+                        }
+
+                        Item {
+                            id: dragHostRef
+                            anchors.fill: parent
+                            z: 50
+                            visible: dragActive
+                            property bool dragActive: false
+                            property var dragToplevel: null
+
+                            property string dragAddress: ""
+                            property int dragFromWs: 0
+                            property real ghostX: 0
+                            function dragKeyOf(t) {
+                                if (!t)
+                                    return "";
+                                if (t.address !== undefined)
+                                    return String(t.address);
+                                if (t.__wid !== undefined)
+                                    return String(t.__wid);
+                                return "";
+                            }
+
+                            Rectangle {
+                                id: ghost
+                                width: 30
+                                height: 24
+                                radius: 8
+                                color: Style.withAlpha(Style.card, 0.92)
+                                border.width: 1
+                                border.color: Style.withAlpha(Style.accent, 0.6)
+                                x: dragHostRef.ghostX - width / 2
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                WindowIcon {
+                                    anchors.centerIn: parent
+                                    iconSize: 16
+                                    toplevel: dragHostRef.dragToplevel
+                                }
+                            }
+
+                            function beginDrag(toplevel, fromWs, gx) {
+                                dragToplevel = toplevel;
+                                dragAddress = dragKeyOf(toplevel);
+                                dragFromWs = fromWs;
+                                ghostX = gx;
+                                dragActive = true;
+                            }
+                            function rowButtons() {
+                                const out = {
+                                    row: null,
+                                    btns: []
+                                };
+                                const box = parent;
+                                if (!box)
+                                    return out;
+                                for (let i = 0; i < box.children.length; i++) {
+                                    const row = box.children[i];
+                                    if (row.objectName !== "workspacesRow")
+                                        continue;
+                                    out.row = row;
+                                    for (let j = 0; j < row.children.length; j++) {
+                                        const b = row.children[j];
+                                        if (b.wsId !== undefined)
+                                            out.btns.push(b);
+                                    }
+                                    break;
+                                }
+                                return out;
+                            }
+                            function rowHit(gx) {
+                                const r = rowButtons();
+                                if (!r.row)
+                                    return -1;
+                                const x = gx - r.row.x;
+                                for (const b of r.btns) {
+                                    if (x >= b.x && x < b.x + b.width)
+                                        return b.wsId;
+                                }
+                                return -1;
+                            }
+                            function moveGhost(gx) {
+                                ghostX = gx;
+
+                                const r = rowButtons();
+                                if (!r.row)
+                                    return;
+                                const x = gx - r.row.x;
+                                for (const b of r.btns)
+                                    b.dropHover = dragActive && x >= b.x && x < b.x + b.width && b.wsId !== dragFromWs;
+                            }
+
+                            function cancelDrag() {
+                                dragActive = false;
+                                dragToplevel = null;
+                                for (const b of rowButtons().btns)
+                                    b.dropHover = false;
+                            }
+                            function dropAt(gx, gy) {
+                                const tl = dragToplevel;
+                                const from = dragFromWs;
+                                const hit = rowHit(gx);
+                                dragActive = false;
+                                dragToplevel = null;
+                                for (const b of rowButtons().btns)
+                                    b.dropHover = false;
+
+                                const key = dragKeyOf(tl);
+                                if (hit > 0 && hit !== from && tl && key !== "") {
+                                    const pt = mapToItem(null, gx, gy !== undefined ? gy : 16);
+                                    Compositor.moveWindowToWorkspace(key, hit, pt.x, pt.y, screenRoot.screenKey);
                                 }
                             }
                         }
@@ -1213,7 +1401,11 @@ ShellRoot {
                         padH: 2
                         marginRight: 2
                         glyphYOffset: 1
-                        onClicked: Quickshell.execDetached([Style.terminal])
+                        onClicked: {
+                            if (qsRoot.launcherEmptyWs)
+                                Compositor.prepareEmptyWorkspaceForLaunch();
+                            Quickshell.execDetached([Style.terminal]);
+                        }
                     }
 
                     BarButton {
@@ -1224,7 +1416,11 @@ ShellRoot {
                         marginRight: 2
                         glyphYOffset: 2
 
-                        onClicked: Quickshell.execDetached(["bash", "-c", "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then exec " + Style.sq(Style.configDir + "/scripts/launch-desktop.sh") + " \"$id\"; else exec xdg-open about:blank; fi"])
+                        onClicked: {
+                            if (qsRoot.launcherEmptyWs)
+                                Compositor.prepareEmptyWorkspaceForLaunch();
+                            Quickshell.execDetached(["bash", "-c", "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then exec " + Style.sq(Style.configDir + "/scripts/launch-desktop.sh") + " \"$id\"; else exec xdg-open about:blank; fi"]);
+                        }
                     }
 
                     BarButton {
@@ -1237,7 +1433,11 @@ ShellRoot {
                         marginRight: 10
                         glyphYOffset: 1
 
-                        onClicked: Quickshell.execDetached(["xdg-open", Quickshell.env("HOME")])
+                        onClicked: {
+                            if (qsRoot.launcherEmptyWs)
+                                Compositor.prepareEmptyWorkspaceForLaunch();
+                            Quickshell.execDetached(["xdg-open", Quickshell.env("HOME")]);
+                        }
                     }
                 }
 
@@ -1260,7 +1460,9 @@ ShellRoot {
                         onPendingTitleChanged: {
                             if (Style.debug)
                                 console.log("[TITLE] pending:", JSON.stringify(pendingTitle));
-                            titleDebounce.restart();
+
+                            if (!titleDebounce.running)
+                                titleDebounce.start();
                         }
 
                         Timer {
@@ -1788,6 +1990,24 @@ ShellRoot {
                         }
                     }
 
+                    PomodoroPopup {
+                        id: pomodoroPopup
+                        bar: panel
+                        qsRoot: rootRef
+                        moduleRef: pomodoroModuleRef
+                    }
+
+                    PomodoroModule {
+                        id: pomodoroModuleRef
+                        shown: qsRoot.showPomodoro
+                        contentYOffset: 1
+                        focusMin: qsRoot.pomodoroFocusMin
+                        breakMin: qsRoot.pomodoroBreakMin
+                        longMin: qsRoot.pomodoroLongMin
+                        longEvery: qsRoot.pomodoroLongEvery
+                        popup: pomodoroPopup
+                    }
+
                     ClockModule {
                         id: clockModule
                         qsRoot: rootRef
@@ -1814,6 +2034,7 @@ ShellRoot {
             AppLauncher {
                 id: appLauncher
                 bar: panel
+                emptyWs: qsRoot.launcherEmptyWs
             }
 
             PowerMenu {
@@ -1824,6 +2045,7 @@ ShellRoot {
             ClipPicker {
                 id: clipPicker
                 bar: panel
+                qsRoot: rootRef
             }
 
             SettingsPanel {
@@ -1847,26 +2069,36 @@ ShellRoot {
 
                 readonly property bool panelHere: notifCenter.panelOpen && notifCenter.panelScreen === screenRoot.screenKey
 
+                readonly property real bellInset: Math.max(0, 1 + rightRow.width - (notifyButton.x + notifyButton.width))
+
                 anchors.top: true
                 anchors.right: true
-                margins.right: Math.max(0, 1 + rightRow.width - (notifyButton.x + notifyButton.width))
+                margins.right: panelHere ? 0 : bellInset
 
                 exclusiveZone: 0
 
                 focusable: panelHere
                 color: "transparent"
 
-                visible: (panelHere || notifCenter.openCount > 0) && !notifCenter.popupSuppressed
+                visible: (panelHere || notifCenter.openCount > 0) && (!notifCenter.popupSuppressed || notifCenter.criticalTracked)
 
                 WlrLayershell.layer: WlrLayer.Overlay
-                implicitWidth: panelHere ? historyPanel.implicitWidth : 300
-                implicitHeight: content.implicitHeight
+                implicitWidth: panelHere ? (Screen.width > 0 ? Screen.width : 1280) : 300
+                implicitHeight: panelHere ? (Screen.height > 0 ? Screen.height : 800) : content.implicitHeight
 
                 Item {
                     id: content
                     width: parent.width
+                    height: parent.height
                     implicitWidth: notifPopupWindow.implicitWidth
-                    implicitHeight: notifPopupWindow.panelHere ? historyPanel.implicitHeight : popupColumn.implicitHeight
+                    implicitHeight: notifPopupWindow.panelHere ? notifPopupWindow.implicitHeight : popupColumn.implicitHeight
+
+                    SafeMouseArea {
+                        anchors.fill: parent
+                        visible: notifPopupWindow.panelHere
+                        enabled: visible
+                        onClicked: notifCenter.closePanel()
+                    }
 
                     Column {
                         id: popupColumn
@@ -1880,7 +2112,7 @@ ShellRoot {
                                 notification: modelData
                                 center: notifCenter
 
-                                visible: index >= notifCenter.openCount - notifCenter.maxVisible
+                                visible: (notifCenter.popupSuppressed && notifCenter.criticalTracked) ? (!!modelData && modelData.urgency === 2) : index >= notifCenter.openCount - notifCenter.maxVisible
                             }
                         }
                     }
@@ -1888,6 +2120,10 @@ ShellRoot {
                     NotificationCenterPanel {
                         id: historyPanel
                         visible: notifPopupWindow.panelHere
+
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.rightMargin: notifPopupWindow.bellInset
                         center: notifCenter
 
                         focus: notifPopupWindow.panelHere

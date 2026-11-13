@@ -13,6 +13,7 @@ QtObject {
             name: "中文",
             match: ["zh"],
             strings: {
+                "common.off": "关",
                 "panel.idle": "锁屏与息屏",
                 "panel.general": "通用",
                 "panel.language": "语言",
@@ -20,6 +21,11 @@ QtObject {
                 "panel.barHeight": "栏宽",
                 "panel.idleLock": "自动锁屏（分钟）",
                 "panel.idleDpms": "自动息屏（分钟）",
+                "panel.pomodoro": "番茄钟",
+                "panel.pomodoroFocus": "专注（分钟）",
+                "panel.pomodoroBreak": "短休（分钟）",
+                "panel.pomodoroLong": "长休（分钟）",
+                "panel.pomodoroEvery": "长休间隔（轮）",
                 "panel.notifications": "通知",
                 "panel.historyLimit": "保留条数",
                 "panel.dnd": "勿扰模式",
@@ -65,6 +71,8 @@ QtObject {
                 "palette.pink": "Tinted-Pink",
                 "palette.violet": "Tinted-Violet",
                 "launcher.search": "搜索应用…",
+                "launcher.empty": "没有可启动的应用",
+                "launcher.noMatch": "没有匹配的应用",
                 "calc.copy": "回车复制",
                 "clips.search": "搜索剪贴板…",
                 "clips.show": "显示",
@@ -76,6 +84,17 @@ QtObject {
                 "notif.clearAll": "全部删除",
                 "notif.clearConfirm": "确认清除？",
                 "notif.empty": "暂无通知",
+                "notif.moreMembers": "…还有 {n} 条",
+                "flag.launcherEmptyWs": "在空白工作区打开应用",
+                "flag.showPomodoro": "番茄钟",
+                "pomodoro.focusDone": "专注结束，休息一下",
+                "pomodoro.focusDoneBody": "已专注 {n} 分钟",
+                "pomodoro.breakDone": "休息结束，继续专注",
+                "pomodoro.breakDoneBody": "休息了 {n} 分钟",
+                "pomodoro.reset": "恢复默认",
+                "pomodoro.stop": "停止计时",
+                "lock.abandon": "锁屏未生效",
+                "lock.abandonBody": "合成器不支持会话锁协议，桌面没有锁定 —— 请不要离开电脑",
                 "notif.ignore": "忽略",
                 "notif.viewDetails": "查看详情",
                 "power.lock": "锁定",
@@ -89,6 +108,9 @@ QtObject {
                 "wx.feels": "体感",
                 "wx.humidity": "湿度",
                 "wx.wind": "风",
+                "wx.updated": "更新于 {t}",
+                "wx.refresh": "刷新",
+                "wx.refreshing": "刷新中…",
                 "wx.c.clear": "晴",
                 "wx.c.mainly": "晴间多云",
                 "wx.c.cloudy": "多云",
@@ -108,6 +130,7 @@ QtObject {
                 "lock.placeholder": "输入密码…",
                 "lock.attempts": "错误 {n} 次",
                 "lock.pamUnavailable": "认证服务不可用",
+                "lock.noSessionLock": "锁屏未能启用(合成器不支持 session-lock), 已自动放弃",
                 "lock.failed": "密码错误",
                 "lock.retry": "尝试过多 · {n}s 后可重试",
                 "lock.hint": "Enter 解锁 · Esc 清空",
@@ -186,6 +209,7 @@ QtObject {
             name: "English",
             match: ["en"],
             strings: {
+                "common.off": "Off",
                 "panel.idle": "Idle inhibit",
                 "panel.general": "General",
                 "panel.language": "Language",
@@ -193,6 +217,11 @@ QtObject {
                 "panel.barHeight": "Bar height",
                 "panel.idleLock": "Auto-lock (min)",
                 "panel.idleDpms": "Screen off (min)",
+                "panel.pomodoro": "Pomodoro",
+                "panel.pomodoroFocus": "Focus (min)",
+                "panel.pomodoroBreak": "Short break (min)",
+                "panel.pomodoroLong": "Long break (min)",
+                "panel.pomodoroEvery": "Long break every",
                 "panel.notifications": "Notifications",
                 "panel.historyLimit": "History size",
                 "panel.dnd": "Do not disturb",
@@ -239,6 +268,8 @@ QtObject {
                 "palette.pink": "Tinted-Pink",
                 "palette.violet": "Tinted-Violet",
                 "launcher.search": "Search apps…",
+                "launcher.empty": "No launchable apps",
+                "launcher.noMatch": "No matching apps",
                 "calc.copy": "Enter to copy",
                 "clips.search": "Search clipboard…",
                 "clips.show": "Show",
@@ -250,6 +281,17 @@ QtObject {
                 "notif.clearAll": "Clear all",
                 "notif.clearConfirm": "Confirm clear?",
                 "notif.empty": "No notifications",
+                "notif.moreMembers": "…and {n} more",
+                "flag.launcherEmptyWs": "Open apps in an empty ws",
+                "flag.showPomodoro": "Pomodoro",
+                "pomodoro.focusDone": "Focus done — take a break",
+                "pomodoro.focusDoneBody": "Focused for {n} minutes",
+                "pomodoro.breakDone": "Break over — back to focus",
+                "pomodoro.breakDoneBody": "Break lasted {n} minutes",
+                "pomodoro.reset": "Reset defaults",
+                "pomodoro.stop": "Stop timer",
+                "lock.abandon": "Lock did not engage",
+                "lock.abandonBody": "Compositor lacks the session-lock protocol — the desktop is NOT locked. Do not walk away.",
                 "notif.ignore": "Ignore",
                 "notif.viewDetails": "View details",
                 "power.lock": "Lock",
@@ -263,6 +305,9 @@ QtObject {
                 "wx.feels": "Feels",
                 "wx.humidity": "Hum",
                 "wx.wind": "Wind",
+                "wx.updated": "Updated {t}",
+                "wx.refresh": "Refresh",
+                "wx.refreshing": "Refreshing…",
                 "wx.c.clear": "Clear",
                 "wx.c.mainly": "Mainly clear",
                 "wx.c.cloudy": "Partly cloudy",
@@ -282,6 +327,7 @@ QtObject {
                 "lock.placeholder": "Input Password…",
                 "lock.attempts": "{n} failed",
                 "lock.pamUnavailable": "Authentication unavailable",
+                "lock.noSessionLock": "Screen lock could not be secured (compositor lacks session-lock support), it was released",
                 "lock.failed": "Incorrect password",
                 "lock.retry": "Too many attempts · retry in {n}s",
                 "lock.hint": "Enter to unlock · Esc to clear",
@@ -442,8 +488,9 @@ QtObject {
                 kind: ""
             };
         const y = date.getFullYear(), m = date.getMonth() + 1, d = date.getDate();
+        const l = Lunar.fromSolar(y, m, d);
 
-        const fk = Lunar.festivalKey(y, m, d);
+        const fk = Lunar.festivalKey(y, m, d, l);
         if (fk && names.festivals && names.festivals[fk])
             return {
                 text: names.festivals[fk],
@@ -457,7 +504,6 @@ QtObject {
                 kind: "term"
             };
 
-        const l = Lunar.fromSolar(y, m, d);
         if (!l)
             return {
                 text: "",
@@ -485,7 +531,7 @@ QtObject {
         const gi = Almanac.dayIndex(date.getFullYear(), date.getMonth() + 1, date.getDate());
         const gy = Almanac.yearIndex(l.year);
         const mi = Almanac.moonPhaseIndex(l.day);
-        const word = gi => a.gan[gi % 10] + a.zhi[gi % 12];
+        const word = idx => a.gan[idx % 10] + a.zhi[idx % 12];
         const term = Almanac.nextTerm(date);
         const termName = term && names.terms ? names.terms[term.index] : "";
         return {

@@ -76,7 +76,7 @@ OverlayPanel {
                         icon: "logout.png",
                         labelKey: "power.logout",
                         key: "e",
-                        cmd: "loginctl terminate-user $USER"
+                        cmd: "loginctl terminate-user \"$USER\""
                     },
                     {
                         icon: "suspend.png",
@@ -149,6 +149,23 @@ OverlayPanel {
                             color: Style.text1
                             font.family: Style.cjk
                             font.pixelSize: 16
+                        }
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: keyText.implicitWidth + 10
+                            height: 16
+                            radius: 4
+                            color: Qt.rgba(1, 1, 1, 0.08)
+
+                            Text {
+                                id: keyText
+                                anchors.centerIn: parent
+                                text: String(btn.modelData.key).toUpperCase()
+                                color: Style.text3
+                                font.family: Style.nerd
+                                font.pixelSize: 11
+                            }
                         }
                     }
 

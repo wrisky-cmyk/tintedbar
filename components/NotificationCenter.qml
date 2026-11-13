@@ -17,11 +17,23 @@ Item {
     property bool fullscreenDnd: true
     readonly property bool popupSuppressed: center.fullscreenDnd && Compositor.fullscreenActive
 
+    readonly property bool criticalTracked: {
+        const list = Style.modelValues(notifServer.trackedNotifications);
+        for (let i = 0; i < list.length; i++)
+            if (list[i] && list[i].urgency === 2)
+                return true;
+        return false;
+    }
+
     property bool panelOpen: false
 
     property string panelScreen: ""
 
     property bool hasUnread: false
+
+    property int burstWindowMs: 120000
+
+    property bool lastChangeWasBurst: false
 
     property var history: []
 
@@ -49,7 +61,7 @@ Item {
                 restart();
                 return;
             }
-            historySave.command = ["sh", "-c", Style.atomicWriteCmd(center.stateDir + "/notification-history.json", JSON.stringify(center.history))];
+            historySave.command = ["sh", "-c", Style.atomicWriteCmd(center.stateDir + "/notification-history.json", JSON.stringify(center.historyForSave()))];
             historySave.running = true;
         }
     }
@@ -57,6 +69,10 @@ Item {
     Process {
         id: historySave
         running: false
+        onExited: exitCode => {
+            if (exitCode !== 0)
+                console.warn("[NOTIFY] history save failed, exitCode " + exitCode);
+        }
     }
 
     Process {
@@ -79,10 +95,18 @@ Item {
                 for (const e of list) {
                     if (!e || e.id === undefined)
                         continue;
-                    out.push(Object.assign({}, e, {
+                    const copy = Object.assign({}, e, {
                         id: 1000000 + out.length,
                         open: false
-                    }));
+                    });
+                    if (Array.isArray(copy.members)) {
+                        copy.members = copy.members.map(function (m, k) {
+                            return (m && typeof m === "object") ? Object.assign({}, m, {
+                                id: 2000000 + out.length * 100 + k
+                            }) : m;
+                        });
+                    }
+                    out.push(copy);
                 }
 
                 center.history = center.history.concat(out);
@@ -139,9 +163,126 @@ Item {
         };
     }
 
+    function historyText(v, max) {
+        const s = (v === undefined || v === null) ? "" : String(v);
+        return s.length > max ? s.substring(0, max) + "…" : s;
+    }
+
+    function utf8ByteLen(s) {
+        let n = 0;
+        for (let i = 0; i < s.length; i++) {
+            const c = s.charCodeAt(i);
+            if (c < 0x80)
+                n += 1;
+            else if (c < 0x800)
+                n += 2;
+            else if (c >= 0xD800 && c < 0xDC00) {
+                n += 4;
+                i++;
+            } else
+                n += 3;
+        }
+        return n;
+    }
+
+    function historyForSave() {
+        const out = [];
+        for (const e of center.history) {
+            if (!e)
+                continue;
+            const c = Object.assign({}, e);
+            c.appName = center.historyText(c.appName, 256);
+            c.summary = center.historyText(c.summary, 1024);
+            c.body = center.historyText(c.body, 4096);
+            c.appIcon = center.historyText(c.appIcon, 512);
+            c.image = center.historyText(c.image, 512);
+            c.desktopEntry = center.historyText(c.desktopEntry, 256);
+            if (e.members) {
+                const ms = [];
+                for (let i = 0; i < e.members.length && i < 20; i++) {
+                    const m = e.members[i];
+                    if (!m || typeof m !== "object")
+                        continue;
+                    ms.push({
+                        id: m.id,
+                        time: m.time,
+                        body: center.historyText(m.body, 1024)
+                    });
+                }
+                c.members = ms;
+            }
+            out.push(c);
+        }
+
+        const ARG_BUDGET = 120000;
+        let used = 2;
+        let keep = 0;
+        for (let i = 0; i < out.length; i++) {
+            const j = JSON.stringify(out[i]);
+            const need = center.utf8ByteLen(j) + 3 * (j.split("'").length - 1) + (keep > 0 ? 1 : 0);
+            if (used + need > ARG_BUDGET)
+                break;
+            used += need;
+            keep = i + 1;
+        }
+        if (keep === 0 && out.length > 0) {
+            const c0 = Object.assign({}, out[0]);
+            delete c0.members;
+            for (; ; ) {
+                const j0 = JSON.stringify(c0);
+                if (center.utf8ByteLen(j0) + 3 * (j0.split("'").length - 1) + 2 <= ARG_BUDGET)
+                    break;
+                if (c0.body === undefined || c0.body.length <= 64)
+                    break;
+                c0.body = c0.body.substring(0, Math.floor(c0.body.length / 2));
+            }
+            out.length = 0;
+            out.push(c0);
+        } else {
+            out.length = keep;
+        }
+        return out;
+    }
+
     function pushEntry(entry) {
         const list = center.history.slice();
-        list.unshift(entry);
+        const head = list[0];
+        if (head && entry.appName !== undefined && entry.summary !== undefined && entry.appName !== "" && entry.summary !== "" && entry.urgency !== 2 && head.urgency !== 2 && head.appName === entry.appName && head.summary === entry.summary && entry.time - head.time <= center.burstWindowMs) {
+            entry.burst = (head.burst || 1) + 1;
+
+            const prior = [];
+            if (head.members) {
+                for (let i = 0; i < head.members.length; i++) {
+                    const m = head.members[i];
+
+                    if (m && typeof m === "object" && typeof m.body === "string")
+                        prior.push({
+                            id: m.id,
+                            time: m.time,
+                            body: m.body
+                        });
+                }
+            }
+            if (prior.length === 0 && head.body !== "")
+                prior.push({
+                    id: head.id,
+                    time: head.time,
+                    body: head.body
+                });
+            prior.push({
+                id: entry.id,
+                time: entry.time,
+                body: entry.body
+            });
+            while (prior.length > 20)
+                prior.shift();
+            entry.members = prior;
+            list[0] = entry;
+            center.lastChangeWasBurst = true;
+        } else {
+            list.unshift(entry);
+            center.lastChangeWasBurst = false;
+        }
 
         if (center.historySettled && list.length > center.historyLimit)
             list.length = center.historyLimit;
@@ -199,6 +340,13 @@ Item {
             if (e.id === id) {
                 if (e.open)
                     center.dismissOne(id);
+                if (e.members) {
+                    for (let i = 0; i < e.members.length; i++) {
+                        const m = e.members[i];
+                        if (m && m.id !== undefined && m.id !== id)
+                            center.dismissOne(m.id);
+                    }
+                }
             } else {
                 list.push(e);
             }
@@ -282,6 +430,8 @@ Item {
         onNotification: n => {
             if (n.lastGeneration) {
                 n.tracked = true;
+
+                Qt.callLater(center.trimTracked);
                 return;
             }
             if (Style.debug) {

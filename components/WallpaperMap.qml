@@ -43,7 +43,8 @@ Item {
 
     function expandPath(p) {
         const s = String(p === undefined ? "" : p).trim();
-        return s.startsWith("~") ? wm.home + s.slice(1) : s;
+
+        return (s === "~" || s.startsWith("~/")) ? wm.home + s.slice(1) : s;
     }
 
     function absorb(text) {
@@ -74,6 +75,12 @@ Item {
             const key = line.slice(0, eq).trim();
             let val = line.slice(eq + 1).trim();
 
+            let mode = "cover";
+            const bar = val.lastIndexOf("|");
+            if (bar > 0 && /^(cover|contain|tile)$/.test(val.slice(bar + 1).trim())) {
+                mode = val.slice(bar + 1).trim();
+                val = val.slice(0, bar).trim();
+            }
             if (!wm.isColor(val)) {
                 const ci = val.search(/\s#/);
                 if (ci >= 0)
@@ -82,16 +89,10 @@ Item {
             if (wm.isColor(val)) {
                 out[key] = {
                     path: "",
-                    mode: "cover",
+                    mode: mode,
                     color: wm.normColor(val)
                 };
                 continue;
-            }
-            let mode = "cover";
-            const bar = val.lastIndexOf("|");
-            if (bar > 0 && /^(cover|contain|tile)$/.test(val.slice(bar + 1).trim())) {
-                mode = val.slice(bar + 1).trim();
-                val = val.slice(0, bar).trim();
             }
             out[key] = {
                 path: wm.expandPath(val),

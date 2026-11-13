@@ -60,13 +60,19 @@ Item {
     Process {
         id: schemeInit
         running: true
-        command: ["sh", "-c", "gsettings get org.gnome.desktop.interface color-scheme; " + "gsettings get org.gnome.desktop.interface icon-theme; " + "gsettings get org.gnome.desktop.interface gtk-theme"]
+        command: ["sh", "-c", "gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null" + " | sed 's/^/CS\\t/'; " + "gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null" + " | sed 's/^/IT\\t/'; " + "gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null" + " | sed 's/^/GT\\t/'"]
         stdout: StdioCollector {
             onStreamFinished: {
-                const lines = String(text).split("\n");
-                root.applyColorScheme(lines[0] || "");
-                root.applyIconTheme(lines[1] || "");
-                root.applyGtkThemeName(lines[2] || "");
+                const vals = {};
+                for (const line of String(text).split("\n")) {
+                    const i = line.indexOf("\t");
+                    if (i <= 0)
+                        continue;
+                    vals[line.substring(0, i)] = line.substring(i + 1);
+                }
+                root.applyColorScheme(vals.CS || "");
+                root.applyIconTheme(vals.IT || "");
+                root.applyGtkThemeName(vals.GT || "");
             }
         }
     }
@@ -88,7 +94,7 @@ Item {
     }
 
     FileView {
-        path: root.home + "/.config/gtk-4.0/settings.ini"
+        path: (Quickshell.env("XDG_CONFIG_HOME") || (root.home + "/.config")) + "/gtk-4.0/settings.ini"
         preload: true
         printErrors: false
         watchChanges: true
@@ -99,7 +105,7 @@ Item {
         onFileChanged: reload()
     }
     FileView {
-        path: root.home + "/.config/gtk-3.0/settings.ini"
+        path: (Quickshell.env("XDG_CONFIG_HOME") || (root.home + "/.config")) + "/gtk-3.0/settings.ini"
         preload: true
         printErrors: false
         watchChanges: true
@@ -205,12 +211,21 @@ Item {
     property string themeCssOut: ""
     readonly property var themeColors: root.parseDefineColors(root.themeCssOut)
 
+    property int cssGen: 0
     Process {
         id: cssResolve
         running: false
-        command: ["bash", root.configDir + "/scripts/theme-css.sh", root.gtkThemeName]
         stdout: StdioCollector {
-            onStreamFinished: root.themeCssOut = text
+            onStreamFinished: {
+                const m = /#CSSGEN (\d+)\s*$/.exec(text);
+                if (m && Number(m[1]) !== root.cssGen)
+                    return;
+
+                if (!m && text !== "")
+                    return;
+
+                root.themeCssOut = m ? text.replace(/#CSSGEN \d+\s*$/, "") : text;
+            }
         }
         onExited: {
             if (root.cssResolvePending) {
@@ -224,13 +239,19 @@ Item {
     function reloadThemeCss() {
         if (root.gtkThemeName === "") {
             root.themeCssOut = "";
+
+            root.cssGen++;
             return;
         }
+
         if (cssResolve.running) {
+            root.cssGen++;
             root.cssResolvePending = true;
             return;
         }
         root.themeCssOut = "";
+        root.cssGen++;
+        cssResolve.command = ["bash", root.configDir + "/scripts/theme-css.sh", root.gtkThemeName, String(root.cssGen)];
         cssResolve.running = true;
     }
 
@@ -252,9 +273,24 @@ Item {
     }
 
     function normalizeCssColor(v) {
-        const m = /^rgba?\(([^)]*)\)$/i.exec(v);
+        const s = String(v).trim();
+
+        if (/^#[0-9a-f]+$/i.test(s)) {
+            const h = s.substring(1).toLowerCase();
+            if (h.length === 3)
+                return "#" + h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            if (h.length === 4)
+                return "#" + h[3] + h[3] + h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            if (h.length === 6)
+                return "#" + h;
+            if (h.length === 8)
+                return "#" + h.substring(6) + h.substring(0, 6);
+            return "";
+        }
+        const m = /^rgba?\(([^)]*)\)$/i.exec(s);
+
         if (!m)
-            return v;
+            return /^[a-z]+$/i.test(s) ? s : "";
         const p = m[1].split(",").map(s => s.trim());
         if (p.length !== 3 && p.length !== 4)
             return "";
@@ -495,7 +531,7 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.10.31"
+    readonly property string version: "26.11.13"
     readonly property string minQuickshellVersion: "0.3.2"
     property string runningQuickshellVersion: ""
     property bool quickshellVersionChecked: false
@@ -534,10 +570,9 @@ Item {
         running: true
         command: ["quickshell", "--version"]
         stdout: StdioCollector {
-            id: versionOutput
+
             onStreamFinished: root.checkQuickshellVersion(text)
         }
-        onExited: root.checkQuickshellVersion(versionOutput.text)
     }
 
     readonly property string fingerprintCmd: "find shell.qml components scripts icons -type f ! -name '.*' ! -name '*~' ! -name '*.swp' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8"
@@ -606,7 +641,7 @@ Item {
             return null;
         const c = String(cls);
         const key = c.toLowerCase();
-        if (key in root.desktopEntryCache)
+        if (Object.prototype.hasOwnProperty.call(root.desktopEntryCache, key))
             return root.desktopEntryCache[key];
         const e = root.lookupDesktopEntry(c);
         root.desktopEntryCache[key] = e;
@@ -677,7 +712,9 @@ Item {
         const slash = p.lastIndexOf("/");
 
         const dir = slash < 0 ? "." : p.substring(0, slash);
-        return "umask 077; mkdir -p " + sq(dir) + " && printf '%s' " + sq(json) + " > " + sq(path + ".tmp") + " && mv -f " + sq(path + ".tmp") + " " + sq(path);
+
+        const tmp = path + "." + Date.now() + ".tmp";
+        return "umask 077; mkdir -p " + sq(dir) + " && printf '%s' " + sq(json) + " > " + sq(tmp) + " && mv -f " + sq(tmp) + " " + sq(path);
     }
 
     function readJsonCmd(path, fallback) {

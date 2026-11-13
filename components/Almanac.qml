@@ -63,7 +63,8 @@ QtObject {
     function nextTerm(date) {
         const y = date.getFullYear();
         const today = alm.jdn(y, date.getMonth() + 1, date.getDate());
-        for (const yy of [y - 1, y, y + 1]) {
+
+        for (const yy of [y, y - 1, y + 1]) {
             for (let n = 0; n < 24; n++) {
                 const t = Lunar.termDate(yy, n);
                 const j = alm.jdn(t.year, t.month, t.day);

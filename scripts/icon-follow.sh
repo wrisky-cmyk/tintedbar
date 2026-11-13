@@ -6,7 +6,7 @@ case "$mode" in dark|light) ;; *) echo "usage: $0 dark|light" >&2; exit 1 ;; esa
 
 key=org.gnome.desktop.interface
 
-if ! cur=$(gsettings get $key icon-theme 2>/dev/null); then
+if ! cur=$(gsettings get "$key" icon-theme 2>/dev/null); then
   echo "icon-follow: failed to read icon-theme, skipping" >&2
   exit 0
 fi

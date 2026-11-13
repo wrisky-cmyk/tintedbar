@@ -6,14 +6,18 @@ singleton Lunar 1.0 Lunar.qml
 singleton Almanac 1.0 Almanac.qml
 singleton WallpaperMap 1.0 WallpaperMap.qml
 singleton IconProbe 1.0 IconProbe.qml
+CapsPoller 1.0 CapsPoller.qml
 Wallpaper 1.0 Wallpaper.qml
 BarButton 1.0 BarButton.qml
 FileIcon 1.0 FileIcon.qml
 Module 1.0 Module.qml
+PomodoroModule 1.0 PomodoroModule.qml
+PomodoroPopup 1.0 PomodoroPopup.qml
 OverlayPanel 1.0 OverlayPanel.qml
 Poller 1.0 Poller.qml
 SafeMouseArea 1.0 SafeMouseArea.qml
 StepCtl 1.0 StepCtl.qml
+StepperRow 1.0 StepperRow.qml
 NotificationCenter 1.0 NotificationCenter.qml
 Weather 1.0 Weather.qml
 RebootNeeded 1.0 RebootNeeded.qml

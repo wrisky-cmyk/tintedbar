@@ -58,7 +58,7 @@ Item {
         cursorShape: Qt.PointingHandCursor
         onClicked: {
             const n = card.note;
-            if (!n)
+            if (!n || card.noteClosed)
                 return;
             for (const a of Style.modelValues(n.actions)) {
                 if (a.identifier === "default") {
@@ -125,6 +125,8 @@ Item {
 
             Text {
                 width: textCol.width
+
+                textFormat: Text.PlainText
                 text: card.note ? card.note.summary : ""
                 visible: text !== ""
                 color: Style.notifText
@@ -138,6 +140,7 @@ Item {
 
             Text {
                 width: textCol.width
+                textFormat: Text.PlainText
                 text: card.note ? card.note.body : ""
                 visible: text !== ""
                 color: Style.notifText
@@ -178,6 +181,8 @@ Item {
                         Text {
                             id: pillText
                             anchors.centerIn: parent
+
+                            textFormat: Text.PlainText
                             text: pill.label
 
                             color: pillMouse.containsMouse ? Style.card : Style.notifText
@@ -192,7 +197,7 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 const a = pill.modelData;
-                                if (!a)
+                                if (!a || card.noteClosed)
                                     return;
                                 a.invoke();
                             }
@@ -201,7 +206,7 @@ Item {
                 }
 
                 Rectangle {
-                    visible: card.pillCount === 1
+                    visible: card.pillCount >= 1
                     implicitWidth: ignoreText.implicitWidth + 24
                     implicitHeight: 26
                     radius: 13
@@ -234,9 +239,16 @@ Item {
     property double expireAt: 0
     property int pausedRemaining: 0
 
+    readonly property bool suppressBypass: card.urgency === 2
+
     function armExpiry() {
-        if (card.note === null || card.timeoutMs <= 0)
+        if (card.note === null || card.timeoutMs <= 0) {
+            card.expireAt = 0;
+            card.pausedRemaining = 0;
+            if (expireTimer)
+                expireTimer.stop();
             return;
+        }
         card.expireAt = Date.now() + card.timeoutMs;
         card.pausedRemaining = card.timeoutMs;
         card.rearmExpiry();
@@ -255,7 +267,7 @@ Item {
         expireTimer.stop();
         if (card.timeoutMs <= 0)
             return;
-        if (card.center && card.center.popupSuppressed)
+        if (card.center && card.center.popupSuppressed && !card.suppressBypass)
             return;
         expireTimer.interval = Math.max(1, Math.round(card.expireAt - Date.now()));
         expireTimer.start();
@@ -265,6 +277,8 @@ Item {
         target: card.center
         function onPopupSuppressedChanged() {
             if (!card.center)
+                return;
+            if (card.suppressBypass)
                 return;
             if (card.center.popupSuppressed) {
                 card.pausedRemaining = Math.max(0, card.expireAt - Date.now());

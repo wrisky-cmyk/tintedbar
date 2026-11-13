@@ -39,6 +39,12 @@ Item {
 
     property int selIndex: 0
 
+    property var _selId: null
+    onSelIndexChanged: {
+        const h = panel.center ? panel.center.history : null;
+        panel._selId = (h && panel.selIndex >= 0 && h[panel.selIndex]) ? h[panel.selIndex].id : null;
+    }
+
     property bool clearArmed: false
 
     property int _lastCount: 0
@@ -50,6 +56,7 @@ Item {
             panel.selIndex = 0;
             panel._lastCount = panel.entryCount;
             panel._lastTopId = panel.topEntryId();
+            panel._selId = (panel.center && panel.center.history.length > 0) ? panel.center.history[0].id : null;
         } else {
             panel.clearArmed = false;
         }
@@ -63,15 +70,31 @@ Item {
     function syncHistoryState() {
         const count = panel.entryCount;
         const topId = panel.topEntryId();
+        const prevSelId = panel._selId;
         if (panel.visible) {
             const grew = count > panel._lastCount;
             const headReplaced = count === panel._lastCount && count > 0 && topId !== panel._lastTopId;
 
             if (grew || headReplaced) {
-                const delta = grew ? count - panel._lastCount : 1;
-                if (panel.selIndex >= 0)
-                    panel.selIndex += delta;
+                if (grew) {
+                    if (panel.selIndex >= 0)
+                        panel.selIndex += count - panel._lastCount;
+                } else if (!(panel.center && panel.center.lastChangeWasBurst)) {
+                    if (panel.selIndex >= 0)
+                        panel.selIndex += 1;
+                }
+
                 list.contentY = 0;
+            } else if (count < panel._lastCount && prevSelId !== null) {
+                const h = panel.center ? panel.center.history : [];
+                let found = -1;
+                for (let i = 0; i < h.length; i++)
+                    if (h[i] && h[i].id === prevSelId) {
+                        found = i;
+                        break;
+                    }
+                if (panel.selIndex >= 0)
+                    panel.selIndex = found >= 0 ? found : Math.min(panel.selIndex, Math.max(0, count - 1));
             }
         }
         panel._lastCount = count;
@@ -82,6 +105,7 @@ Item {
         }
         if (panel.selIndex >= count)
             panel.selIndex = Math.max(0, count - 1);
+        panel._selId = (panel.selIndex >= 0 && panel.center && panel.center.history[panel.selIndex]) ? panel.center.history[panel.selIndex].id : null;
     }
 
     Connections {
@@ -106,7 +130,18 @@ Item {
     function scrollToSel() {
         if (panel.selIndex < 0)
             return;
-        const row = entries.children[panel.selIndex];
+
+        const kids = entries.children;
+        let row = null;
+        for (let i = 0, n = 0; i < kids.length; i++) {
+            const k = kids[i];
+            if (!k || k.visible === false || k.height <= 0)
+                continue;
+            if (n++ === panel.selIndex) {
+                row = k;
+                break;
+            }
+        }
         if (!row || !row.height)
             return;
         const top = row.y;
@@ -153,6 +188,10 @@ Item {
         border.width: 1
         border.color: Style.border
         height: layout.implicitHeight + 20
+
+        MouseArea {
+            anchors.fill: parent
+        }
 
         Column {
             id: layout
@@ -281,7 +320,7 @@ Item {
 
                             width: entries.width
 
-                            height: Math.max(panel.rowHeight, 8 + rowTitle.implicitHeight + (rowBody.visible ? 3 + rowBody.implicitHeight : 0) + 8)
+                            height: Math.max(panel.rowHeight, 8 + rowTitle.implicitHeight + (rowMembers.visible ? 3 + rowMembers.implicitHeight : (rowBody.visible ? 3 + rowBody.implicitHeight : 0)) + 8)
 
                             Rectangle {
                                 anchors.fill: parent
@@ -379,13 +418,28 @@ Item {
                             }
 
                             Text {
+                                id: rowBurst
+                                anchors.right: rowTime.left
+                                anchors.rightMargin: 6
+                                anchors.top: parent.top
+                                anchors.topMargin: 10
+                                visible: !!row.modelData && (row.modelData.burst || 0) > 1
+                                text: visible ? "×" + row.modelData.burst : ""
+                                color: Style.text3
+                                font.family: Style.cjk
+                                font.pixelSize: 10
+                            }
+
+                            Text {
                                 id: rowTitle
                                 anchors.left: parent.left
                                 anchors.leftMargin: row.hasIcon ? 38 : 10
-                                anchors.right: rowTime.left
+                                anchors.right: rowBurst.visible ? rowBurst.left : rowTime.left
                                 anchors.rightMargin: 8
                                 anchors.top: parent.top
                                 anchors.topMargin: 8
+
+                                textFormat: Text.PlainText
                                 text: row.modelData ? row.modelData.summary : ""
                                 color: Style.text1
                                 font.family: Style.cjk
@@ -396,14 +450,63 @@ Item {
                                 elide: Text.ElideRight
                             }
 
+                            Column {
+                                id: rowMembers
+                                anchors.left: rowTitle.left
+                                anchors.right: rowTitle.right
+                                anchors.top: rowTitle.bottom
+                                anchors.topMargin: 3
+                                spacing: 1
+                                visible: rowMembersList.count > 0
+                                Repeater {
+                                    id: rowMembersList
+                                    model: {
+                                        if (row.index !== panel.selIndex)
+                                            return null;
+                                        const e = row.modelData;
+
+                                        if (!e || !e.members || e.members.length === 0)
+                                            return null;
+                                        const lines = [];
+                                        for (let i = 0; i < e.members.length; i++) {
+                                            const m = e.members[i];
+
+                                            if (!m || typeof m.body !== "string" || m.body === "")
+                                                continue;
+                                            lines.push(Qt.formatTime(new Date(m.time), "HH:mm") + "  " + m.body);
+                                        }
+                                        const extra = lines.length - 5;
+                                        if (extra > 0) {
+                                            lines.length = 5;
+                                            lines.push(I18n.fill(I18n.t("notif.moreMembers"), {
+                                                n: extra
+                                            }));
+                                        }
+                                        return lines;
+                                    }
+                                    delegate: Text {
+                                        required property int index
+                                        required property var modelData
+                                        width: rowMembers.width
+                                        textFormat: Text.PlainText
+                                        text: modelData
+                                        color: Style.text3
+                                        font.family: Style.cjk
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+
                             Text {
                                 id: rowBody
                                 anchors.left: rowTitle.left
                                 anchors.right: rowTitle.right
                                 anchors.top: rowTitle.bottom
                                 anchors.topMargin: 3
+                                textFormat: Text.PlainText
                                 text: row.modelData ? row.modelData.body : ""
-                                visible: text !== ""
+                                visible: text !== "" && !rowMembers.visible
                                 color: Style.text3
                                 font.family: Style.cjk
                                 font.pixelSize: 12

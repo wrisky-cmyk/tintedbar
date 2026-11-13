@@ -72,7 +72,6 @@ Item {
             const c = obj ? (obj["class"] || obj["initialClass"] || "") : "";
             winIcon.appClass = String(c || "");
         }
-        winIcon.refresh();
     }
 
     function refresh() {

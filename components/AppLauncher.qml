@@ -9,28 +9,46 @@ OverlayPanel {
 
     property string query: ""
 
+    property bool emptyWs: true
+
     readonly property var appRecords: {
         const out = [];
         for (const app of Style.modelValues(DesktopEntries.applications)) {
             if (!app || !app.name)
                 continue;
             const nm = String(app.name);
+            const keywords = typeof app.keywords === "string" ? app.keywords : (app.keywords ? app.keywords.join(" ") : "");
+            const meta = [app.genericName || "", keywords, app.comment || ""].join(" ");
             out.push({
                 app: app,
                 name: nm,
                 nameLc: nm.toLowerCase(),
                 execLc: String(app.execString || "").toLowerCase(),
+                metaLc: String(meta).toLowerCase(),
                 key: String(app.id || app.name || "")
             });
         }
         return out;
     }
 
+    property bool launchBusy: false
+    Timer {
+        id: launchBusyReset
+        interval: 250
+        onTriggered: launcher.launchBusy = false
+    }
     function launch(app) {
-        if (!app)
+        if (!app || launchBusy)
             return;
+        launchBusy = true;
+        launchBusyReset.restart();
         const key = String(app.id || app.name || "");
         UsageStore.bump(key);
+
+        if (Style.debug)
+            console.log("[LAUNCH] emptyWs=", emptyWs, "key=", key);
+        if (emptyWs)
+            Compositor.prepareEmptyWorkspaceForLaunch();
 
         Style.launchDesktop(key);
         launcher.close();
@@ -90,11 +108,21 @@ OverlayPanel {
         running: false
     }
 
+    function cardSubmit() {
+        if (input.activeFocus || !launcher.visible)
+            return;
+        if (launcher.calc !== null)
+            launcher.copyCalc();
+        else
+            launcher.launchSel();
+    }
+
     function open() {
         visible = true;
         query = "";
         input.text = "";
         list.currentIndex = 0;
+        launchBusy = false;
         input.forceActiveFocus();
         if (Style.debug)
             console.log("[LAUNCHER] open(), visible=", visible);
@@ -109,7 +137,7 @@ OverlayPanel {
         const q = query.toLowerCase();
         const out = [];
         for (const r of launcher.appRecords) {
-            if (q === "" || r.nameLc.indexOf(q) >= 0 || r.execLc.indexOf(q) >= 0)
+            if (q === "" || r.nameLc.indexOf(q) >= 0 || r.execLc.indexOf(q) >= 0 || r.metaLc.indexOf(q) >= 0)
                 out.push(r);
         }
 
@@ -146,14 +174,9 @@ OverlayPanel {
 
         Keys.onUpPressed: launcher.moveSel(-1)
         Keys.onDownPressed: launcher.moveSel(1)
-        Keys.onReturnPressed: {
-            if (input.activeFocus)
-                return;
-            if (launcher.calc !== null)
-                launcher.copyCalc();
-            else
-                launcher.launchSel();
-        }
+
+        Keys.onEnterPressed: launcher.cardSubmit()
+        Keys.onReturnPressed: launcher.cardSubmit()
 
         Column {
             anchors.fill: parent
@@ -236,83 +259,101 @@ OverlayPanel {
                 }
             }
 
-            ListView {
-                id: list
+            Item {
                 width: parent.width
 
                 height: parent.height - 44 - (calcRow.visible ? 44 : 0)
-                clip: true
 
-                currentIndex: 0
-                spacing: 2
+                ListView {
+                    id: list
+                    anchors.fill: parent
+                    clip: true
 
-                model: launcher.visible ? launcher.apps : []
+                    currentIndex: 0
+                    spacing: 2
 
-                delegate: Item {
-                    id: row
-                    width: list.width
-                    height: 40
+                    model: launcher.visible ? launcher.apps : []
 
-                    required property int index
-                    required property var modelData
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 6
-
-                        color: index === list.currentIndex ? Style.hover : "transparent"
+                    onCountChanged: {
+                        currentIndex = 0;
+                        positionViewAtBeginning();
                     }
 
-                    FileIcon {
-                        id: fIcon
-                        visible: true
+                    delegate: Item {
+                        id: row
+                        width: list.width
+                        height: 40
 
-                        iconNames: row.modelData.app.icon ? [row.modelData.app.icon] : []
+                        required property int index
+                        required property var modelData
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 6
+
+                            color: index === list.currentIndex ? Style.hover : "transparent"
+                        }
+
+                        FileIcon {
+                            id: fIcon
+                            visible: true
+
+                            iconNames: row.modelData.app.icon ? [row.modelData.app.icon] : []
+                        }
+
+                        IconImage {
+                            id: appImg
+                            x: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 24
+                            height: 24
+                            source: fIcon.source
+                            visible: fIcon.source !== "" && status !== Image.Error
+                        }
+
+                        Text {
+                            anchors.centerIn: appImg
+                            visible: !appImg.visible
+
+                            text: Style.glyphFor(row.modelData.name, row.modelData.name) || "●"
+                            color: Style.text1
+                            font.family: Style.nerd
+                            font.pixelSize: 18
+                        }
+
+                        Text {
+                            anchors.left: appImg.right
+                            anchors.leftMargin: 10
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: row.modelData.name
+                            color: Style.text1
+                            font.family: Style.cjk
+                            font.pixelSize: 14
+                            elide: Text.ElideRight
+                        }
+
+                        SafeMouseArea {
+                            id: rowMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+
+                            onPositionChanged: if (list.currentIndex !== row.index)
+                                list.currentIndex = row.index
+                            onClicked: launcher.launch(row.modelData.app)
+                        }
                     }
+                }
 
-                    IconImage {
-                        id: appImg
-                        x: 8
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 24
-                        height: 24
-                        source: fIcon.source
-                        visible: fIcon.source !== "" && status !== Image.Error
-                    }
-
-                    Text {
-                        anchors.centerIn: appImg
-                        visible: !appImg.visible
-
-                        text: Style.glyphFor(row.modelData.name, row.modelData.name) || "●"
-                        color: Style.text1
-                        font.family: Style.nerd
-                        font.pixelSize: 18
-                    }
-
-                    Text {
-                        anchors.left: appImg.right
-                        anchors.leftMargin: 10
-                        anchors.right: parent.right
-                        anchors.rightMargin: 8
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: row.modelData.name
-                        color: Style.text1
-                        font.family: Style.cjk
-                        font.pixelSize: 14
-                        elide: Text.ElideRight
-                    }
-
-                    SafeMouseArea {
-                        id: rowMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-
-                        onPositionChanged: if (list.currentIndex !== row.index)
-                            list.currentIndex = row.index
-                        onClicked: launcher.launch(row.modelData.app)
-                    }
+                Text {
+                    anchors.centerIn: parent
+                    visible: launcher.apps.length === 0
+                    text: launcher.appRecords.length === 0 ? I18n.t("launcher.empty") : I18n.t("launcher.noMatch")
+                    color: Style.text3
+                    font.family: Style.cjk
+                    font.pixelSize: 13
                 }
             }
         }

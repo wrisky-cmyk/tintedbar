@@ -7,6 +7,10 @@ Item {
 
     property string outputName: ""
 
+    property var dragHost: null
+
+    property bool dropHover: false
+
     property var pulseTops: []
 
     function pulseHit(t) {
@@ -116,12 +120,21 @@ Item {
         }
     }
 
+    Rectangle {
+        anchors.fill: parent
+        radius: 8
+        color: wsBtn.dropHover ? Style.withAlpha(Style.accent, 0.10) : "transparent"
+        border.width: wsBtn.dropHover ? 1 : 0
+        border.color: Style.withAlpha(Style.accent, 0.6)
+    }
+
     Row {
         id: contentRow
         anchors.centerIn: parent
         spacing: 4
 
         Text {
+            id: numText
             height: 24
             verticalAlignment: Text.AlignVCenter
             text: wsBtn.wsId
@@ -160,21 +173,94 @@ Item {
         }
     }
 
+    readonly property int iconCell: 22
+    readonly property int iconW: 18
+    function iconAt(mx) {
+        for (let i = 0; i < iconModel.count; i++) {
+            const x0 = contentRow.x + numText.width + 4 + i * iconCell;
+            if (mx >= x0 && mx <= x0 + iconW)
+                return iconModel.get(i).toplevel;
+        }
+        return null;
+    }
+
+    function dragKeyOf(t) {
+        if (!t)
+            return "";
+        if (t.address !== undefined)
+            return String(t.address);
+        if (t.__wid !== undefined)
+            return String(t.__wid);
+        return "";
+    }
+    function activate() {
+        if (wsBtn.niri) {
+            Compositor.activateWorkspace(wsBtn.wsId, wsBtn.outputName);
+            return;
+        }
+        if (wsBtn.ws) {
+            wsBtn.ws.activate();
+        } else {
+            Compositor.dispatchWorkspace(wsBtn.wsId);
+        }
+    }
     MouseArea {
         id: wsMouse
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onClicked: {
-            if (wsBtn.niri) {
-                Compositor.activateWorkspace(wsBtn.wsId, wsBtn.outputName);
+
+        property var pressToplevel: null
+        property real pressX: 0
+        property real pressY: 0
+        property real pressTime: 0
+        property bool wasDrag: false
+        onPressed: m => {
+            pressX = m.x;
+            pressY = m.y;
+            pressTime = Date.now();
+            pressToplevel = wsBtn.iconAt(m.x);
+            wasDrag = false;
+        }
+        onPositionChanged: m => {
+            if (!wsMouse.pressed) {
+                if (pressToplevel !== null)
+                    pressToplevel = null;
+                if (wasDrag && wsBtn.dragHost)
+                    wsBtn.dragHost.cancelDrag();
+                wasDrag = false;
                 return;
             }
-            if (wsBtn.ws) {
-                wsBtn.ws.activate();
-            } else {
-                Compositor.dispatchWorkspace(wsBtn.wsId);
+            if (pressToplevel === null || wsBtn.dragHost === null)
+                return;
+
+            if (!wasDrag && wsBtn.hasWindows && Date.now() - pressTime > 120 && (Math.abs(m.x - pressX) > 8 || Math.abs(m.y - pressY) > 8)) {
+                wasDrag = true;
+                const g = mapToItem(wsBtn.dragHost, m.x, m.y);
+                wsBtn.dragHost.beginDrag(pressToplevel, wsBtn.wsId, g.x);
             }
+            if (wasDrag) {
+                const g = mapToItem(wsBtn.dragHost, m.x, m.y);
+                wsBtn.dragHost.moveGhost(g.x);
+            }
+        }
+        onReleased: m => {
+            if (wasDrag) {
+                const g = mapToItem(wsBtn.dragHost, m.x, m.y);
+                wsBtn.dragHost.dropAt(g.x, g.y);
+            }
+        }
+
+        onCanceled: () => {
+            if (wasDrag && wsBtn.dragHost && wsBtn.dragHost.dragActive) {
+                wsBtn.dragHost.dropAt(wsBtn.dragHost.ghostX);
+            }
+            wasDrag = false;
+        }
+        onClicked: {
+            if (wsMouse.wasDrag)
+                return;
+            wsBtn.activate();
         }
     }
 
@@ -197,9 +283,7 @@ Item {
             "focusedmon": true,
             "focusedmonv2": true,
             "urgent": true,
-            "fullscreen": true,
             "changefloatingmode": true,
-            "pin": true,
             "togglegroup": true,
             "moveintogroup": true,
             "moveoutofgroup": true,

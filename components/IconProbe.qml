@@ -14,6 +14,8 @@ Item {
 
     function iconCacheSet(key, path) {
         root.iconCache[key] = path;
+        if (root._iconProbeRetries[key] !== undefined)
+            delete root._iconProbeRetries[key];
     }
 
     signal iconProbesFinished
@@ -22,6 +24,8 @@ Item {
 
     property int _iconProbeGen: 0
     property int _iconProbeBatchGen: 0
+
+    property var _iconProbeRetries: ({})
 
     Timer {
         id: iconProbeFlush
@@ -53,7 +57,7 @@ Item {
             }
             if (n === 0 && root._loginRetryWatch.length === 0)
                 return;
-            console.log("[ICONPROBE] 登录 MISS 重试: " + n + " 个 key 重新探测, 观察 " + root._loginRetryWatch.length + " 个在途");
+            console.log("[ICONPROBE] login MISS retry: " + n + " keys requeued, watching " + root._loginRetryWatch.length + " in-flight");
             for (const k in retry)
                 delete root.iconCache[k];
 
@@ -79,7 +83,7 @@ Item {
             if (Array.isArray(names) && names.length > 0)
                 return names;
         } catch (e) {
-            console.warn("[ICONPROBE] 无法解析候选名 key: " + e);
+            console.warn("[ICONPROBE] failed to parse candidate key: " + e);
         }
         return undefined;
     }
@@ -120,6 +124,7 @@ Item {
             s += "p=\"$(probe" + names + ")\"\n";
             s += "printf '%s\\037%s\\n' " + Style.sq(k) + " \"$p\"\n";
         }
+        s += "printf 'DONE\\n'\n";
         iconProbeProc.command = ["sh", "-c", s];
         iconProbeProc.running = true;
     }
@@ -141,10 +146,15 @@ Item {
                 }
             }
         };
+        let sawDone = false;
         if (!stale) {
             for (const line of String(text).split("\n")) {
                 if (line === "")
                     continue;
+                if (line === "DONE") {
+                    sawDone = true;
+                    continue;
+                }
                 const sep = line.indexOf("\u001f");
                 if (sep < 0)
                     continue;
@@ -157,9 +167,26 @@ Item {
 
             for (const k of root._iconProbePending) {
                 const landed = root.iconCacheGet(k);
-                if (landed === undefined)
-                    root.iconCacheSet(k, "");
-                watchLanded(k, landed === undefined || landed === "");
+                if (landed === undefined) {
+                    if (sawDone) {
+                        watchLanded(k, false);
+                        root.iconCacheSet(k, "");
+                    } else {
+                        watchLanded(k, false);
+                        const names = root.iconProbeNamesForKey(k);
+                        const tries = Number(root._iconProbeRetries[k] || 0) + 1;
+                        root._iconProbeRetries[k] = tries;
+                        if (names !== undefined && tries <= 2) {
+                            root._iconQueue[k] = names;
+                            iconProbeFlush.restart();
+                        } else {
+                            root.iconCacheSet(k, "");
+                            console.warn("[ICONPROBE] no stdout after retries, marking MISS: " + k);
+                        }
+                    }
+                } else {
+                    watchLanded(k, landed === "");
+                }
             }
         } else {
             root._loginRetryWatch = [];
@@ -176,16 +203,16 @@ Item {
         s += "[ -n \"$t\" ] || t=\"$(sed -n 's/^gtk-icon-theme-name=//p'";
         s += " \"$HOME/.config/gtk-3.0/settings.ini\" 2>/dev/null)\"\n";
         s += "[ -n \"$t\" ] || t=hicolor\n";
+
+        s += "CHAIN=\"\"\n";
+        s += "for base in \"$HOME/.local/share/icons\" /usr/share/icons; do\n";
+        s += "  [ -f \"$base/$t/index.theme\" ] && CHAIN=\"$CHAIN";
+        s += " $(sed -n 's/^Inherits=//p' \"$base/$t/index.theme\" | tr ',' ' ')\"\n";
+        s += "done\n";
         s += "try_name() {\n";
         s += "  n=\"$1\"\n";
 
-        s += "  ths=\"$t\"\n";
-        s += "  for base in \"$HOME/.local/share/icons\" /usr/share/icons; do\n";
-        s += "    [ -f \"$base/$t/index.theme\" ] && ths=\"$ths";
-        s += " $(sed -n 's/^Inherits=//p' \"$base/$t/index.theme\" | tr ',' ' ')\"\n";
-        s += "  done\n";
-        s += "  ths=\"$ths hicolor Adwaita default\"\n";
-        s += "  for th in $ths; do\n";
+        s += "  for th in \"$t\" $CHAIN hicolor Adwaita default; do\n";
         s += "    for base in \"$HOME/.local/share/icons\" /usr/share/icons; do\n";
         s += "      [ -d \"$base/$th\" ] || continue\n";
         s += "      # 不写死尺寸: 直接扫所有尺寸目录(含 512x512、@2x 等)\n";

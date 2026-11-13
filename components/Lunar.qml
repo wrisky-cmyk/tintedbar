@@ -169,11 +169,12 @@ QtObject {
             "12-8": "laba"
         })
 
-    function festivalKey(y, m, d) {
+    function festivalKey(y, m, d, pre) {
         const s = lunar.solarFestivals[m + "-" + d];
         if (s)
             return s;
-        const l = lunar.fromSolar(y, m, d);
+
+        const l = pre !== undefined ? pre : lunar.fromSolar(y, m, d);
         if (!l || l.isLeap)
             return "";
         const k = lunar.lunarFestivals[l.month + "-" + l.day];

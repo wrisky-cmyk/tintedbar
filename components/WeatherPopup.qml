@@ -171,6 +171,40 @@ PopupWindow {
                     }
                 }
             }
+
+            Item {
+                width: parent.width
+                height: 18
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Style.text3
+                    font.family: Style.cjk
+                    font.pixelSize: 11
+                    text: weather.fetchedAt > 0 ? I18n.fill(I18n.t("wx.updated"), {
+                        t: Qt.formatTime(new Date(weather.fetchedAt), "hh:mm")
+                    }) : ""
+                }
+
+                Text {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    color: refreshMouse.containsMouse ? Style.accent : Style.text3
+                    font.family: Style.cjk
+                    font.pixelSize: 11
+                    text: weather.refreshing ? I18n.t("wx.refreshing") : I18n.t("wx.refresh")
+                }
+
+                MouseArea {
+                    id: refreshMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: weather.refresh()
+                }
+            }
         }
     }
 }

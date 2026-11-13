@@ -105,7 +105,7 @@ Item {
 
             const app = String(w.app_id || "");
             for (const old of root.niriWindows)
-                if (old.wid === w.id) {
+                if (root.sameWid(old.wid, w.id)) {
                     e = old;
                     break;
                 }
@@ -139,7 +139,49 @@ Item {
             e.focused = !!w.is_focused;
             kept.push(e);
         }
+
+        root.niriTitlePending = {};
+        niriTitleFlush.stop();
+        niriTitleDeadline.stop();
         root.niriWindows = kept;
+    }
+
+    property var niriTitlePending: ({})
+    Timer {
+        id: niriTitleFlush
+        interval: 50
+        repeat: false
+        onTriggered: root.flushNiriTitles()
+    }
+
+    Timer {
+        id: niriTitleDeadline
+        interval: 200
+        repeat: false
+        onTriggered: root.flushNiriTitles()
+    }
+    function queueNiriTitle(wid, title) {
+        const had = root.niriTitlePending && Object.keys(root.niriTitlePending).length > 0;
+        const m = Object.assign({}, root.niriTitlePending);
+        m[String(wid)] = String(title || "");
+        root.niriTitlePending = m;
+        if (!had)
+            niriTitleDeadline.restart();
+        niriTitleFlush.restart();
+    }
+    function flushNiriTitles() {
+        niriTitleDeadline.stop();
+        const m = root.niriTitlePending;
+        if (!m || Object.keys(m).length === 0)
+            return;
+        root.niriTitlePending = {};
+        for (const w of root.niriWindows) {
+            const t = m[String(w.wid)];
+            if (t !== undefined)
+                w.obj.title = t;
+        }
+        root.niriWindows = root.niriWindows.slice();
+        root.compositorUpdated();
     }
 
     function applyNiriWorkspaces(arr) {
@@ -183,7 +225,7 @@ Item {
                         ws.focused = false;
                 }
                 root.niriWsList = root.niriWsList.slice();
-            } else {
+            } else if (v.focused !== false) {
                 for (const ws of root.niriWsList)
                     ws.focused = ws.id === v.id;
 
@@ -201,18 +243,26 @@ Item {
             const app = String(w.app_id || "");
             let found = null;
             for (const old of root.niriWindows)
-                if (old.wid === w.id) {
+                if (root.sameWid(old.wid, w.id)) {
                     found = old;
                     break;
                 }
             if (found) {
-                found.obj.title = String(w.title || "");
+                const title = String(w.title || "");
+                const focused = !!w.is_focused;
+                const urgent = !!w.is_urgent;
+
+                if (found.obj.title !== title && found.obj.class === app && found.obj.wayland.appId === app && found.obj.lastIpcObject.class === app && found.obj.urgent === urgent && found.wsid === w.workspace_id && found.focused === focused) {
+                    root.queueNiriTitle(w.id, title);
+                    return;
+                }
+                found.obj.title = title;
                 found.obj.class = app;
                 found.obj.wayland.appId = app;
                 found.obj.lastIpcObject.class = app;
-                found.obj.urgent = !!w.is_urgent;
+                found.obj.urgent = urgent;
                 found.wsid = w.workspace_id;
-                found.focused = !!w.is_focused;
+                found.focused = focused;
 
                 root.niriWindows = root.niriWindows.slice();
             } else {
@@ -239,18 +289,15 @@ Item {
             }
         } else if (key === "WindowClosed") {
             const cid = (v.id !== undefined) ? v.id : v.window_id;
-            root.niriWindows = root.niriWindows.filter(w => String(w.wid) !== String(cid));
+            root.niriWindows = root.niriWindows.filter(w => !root.sameWid(w.wid, cid));
         } else if (key === "WindowFocusChanged") {
             for (const w of root.niriWindows)
-                w.focused = (w.wid === v.id);
+                w.focused = root.sameWid(w.wid, v.id);
 
             root.niriWindows = root.niriWindows.slice();
         } else if (key === "WindowTitleChanged") {
-            for (const w of root.niriWindows)
-                if (w.wid === v.id)
-                    w.obj.title = String(v.title || "");
-
-            root.niriWindows = root.niriWindows.slice();
+            root.queueNiriTitle(v.id, v.title);
+            return;
         } else if (key === "WindowUrgencyChanged") {
             for (const w of root.niriWindows)
                 if (String(w.wid) === String(v.id))
@@ -262,11 +309,7 @@ Item {
             root.niriLayout = String(root.niriLayoutNames[kb.current_idx] || "");
         } else if (key === "KeyboardLayoutSwitched") {
             root.niriLayout = String(root.niriLayoutNames[v.idx] || v.idx);
-        } else if (key === "ConfigLoaded") {
-            return;
-        } else {
-            return;
-        }
+        } else {}
         root.compositorUpdated();
     }
 
@@ -369,6 +412,158 @@ Item {
             Hyprland.dispatch('hl.dsp.focus({ workspace = "' + root.luaStr(String(id)) + '" })');
         } else {
             Hyprland.dispatch("workspace " + id);
+        }
+    }
+
+    readonly property int wsCapMax: 20
+
+    function stripCount(outputName) {
+        let n = 10;
+        const cap = root.wsCapMax;
+        const bump = function (idx) {
+            if (idx > n && idx <= cap)
+                n = idx;
+        };
+        if (root.name === "niri") {
+            let m = 1;
+            for (const ws of root.niriWsList) {
+                if (outputName !== "" && ws.output !== outputName)
+                    continue;
+                if (ws.idx > m && ws.idx <= cap)
+                    m = ws.idx;
+            }
+            if (root.niriFocusedOutput === outputName && root.niriFocusedIdx > m && root.niriFocusedIdx <= cap)
+                m = root.niriFocusedIdx;
+            return m;
+        }
+        for (const w of root.modelValues(Hyprland.workspaces)) {
+            if (!w || w.id < 1 || w.id > cap)
+                continue;
+            const wmon = typeof w.monitor === "string" ? w.monitor : (w.monitor ? w.monitor.name : "");
+            if (outputName !== "" && wmon !== "" && wmon !== outputName)
+                continue;
+            bump(w.id);
+        }
+        return n;
+    }
+
+    function prepareEmptyWorkspaceForLaunch() {
+        let switched = false;
+        if (root.name === "niri") {
+            const out = root.niriFocusedOutput;
+            if (out === "" || root.niriFocusedIdx < 0)
+                return false;
+            if (windowsForWorkspace(root.niriFocusedIdx, out).length === 0)
+                return false;
+            let firstEmpty = -1;
+            for (const ws of root.niriWsList) {
+                if (ws.output !== out)
+                    continue;
+
+                if (ws.idx >= 1 && ws.idx <= root.wsCapMax && ws.idx !== root.niriFocusedIdx && firstEmpty < 0 && windowsForWorkspace(ws.idx, out).length === 0)
+                    firstEmpty = ws.idx;
+            }
+
+            if (firstEmpty >= 0) {
+                activateWorkspace(firstEmpty, out);
+                switched = true;
+            }
+            if (switched)
+                root.kickEmptyWsResync();
+            return switched;
+        }
+
+        let focusedId = -1;
+        const occupied = {};
+        const mon = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
+        for (const w of root.modelValues(Hyprland.workspaces)) {
+            if (!w || w.id < 1 || w.id > root.wsCapMax)
+                continue;
+
+            const wmon = typeof w.monitor === "string" ? w.monitor : (w.monitor ? w.monitor.name : "");
+            if (mon !== "" && wmon !== "" && wmon !== mon) {
+                occupied[w.id] = true;
+                continue;
+            }
+            if (w.focused)
+                focusedId = w.id;
+            if (root.modelValues(w.toplevels).length > 0)
+                occupied[w.id] = true;
+        }
+        if (focusedId < 0)
+            return false;
+        if (!occupied[focusedId])
+            return false;
+        let firstEmpty = -1;
+        for (let id = 1; id <= root.wsCapMax; id++) {
+            if (id === focusedId)
+                continue;
+            if (!occupied[id]) {
+                firstEmpty = id;
+                break;
+            }
+        }
+
+        if (firstEmpty > 0) {
+            activateWorkspace(firstEmpty);
+            switched = true;
+            root.kickEmptyWsResync();
+        }
+        return switched;
+    }
+
+    Timer {
+        id: emptyWsResyncA
+        interval: 1500
+        onTriggered: root.requestToplevelResync("empty-ws-1")
+    }
+    Timer {
+        id: emptyWsResyncB
+        interval: 4500
+        onTriggered: root.requestToplevelResync("empty-ws-2")
+    }
+    function kickEmptyWsResync() {
+        emptyWsResyncA.restart();
+        emptyWsResyncB.restart();
+    }
+
+    property string pendingMoveTarget: ""
+    property real wsCursorX: 0
+    property real wsCursorY: 16
+
+    function sameWid(a, b) {
+        return String(a) === String(b);
+    }
+
+    function moveWindowToWorkspace(address, targetWs, dropX, dropY, outputName) {
+        if (root.name === "niri") {
+            if (outputName === undefined || outputName === "" || outputName === root.niriFocusedOutput) {
+                Quickshell.execDetached(["niri", "msg", "action", "move-window-to-workspace", "--window-id", String(address), String(targetWs)]);
+            } else {
+                Quickshell.execDetached(["sh", "-c", "niri msg action focus-monitor " + root.sq(outputName) + " && niri msg action move-window-to-workspace --window-id " + root.sq(String(address)) + " " + root.sq(String(targetWs))]);
+            }
+            return;
+        }
+
+        const a = String(address);
+        const full = a.startsWith("0x") ? a : "0x" + a;
+        if (!Hyprland.usingLua) {
+            Hyprland.dispatch("movetoworkspace " + String(targetWs) + ",address:" + full);
+            return;
+        }
+        Hyprland.dispatch('hl.dsp.focus({ window = "address:' + root.luaStr(full) + '" })');
+        wsCursorX = dropX;
+        wsCursorY = dropY;
+        pendingMoveTarget = String(targetWs);
+        settleMoveTimer.restart();
+    }
+    Timer {
+        id: settleMoveTimer
+        interval: 80
+        onTriggered: {
+            Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + root.luaStr(pendingMoveTarget) + '" })');
+
+            Hyprland.dispatch('hl.dsp.cursor.move({ x = ' + Math.round(root.wsCursorX) + ', y = ' + Math.round(root.wsCursorY) + ' })');
         }
     }
 
@@ -628,10 +823,11 @@ Item {
         property int attempts: 0
         onTriggered: {
             pulseRefreshTimer.attempts++;
-            let refreshed = root.notificationPulseSentinels.length > 0;
+
+            let refreshed = false;
             for (const pair of root.notificationPulseSentinels) {
-                if (root.toplevelIpcFingerprint(pair.toplevel) === pair.snap) {
-                    refreshed = false;
+                if (root.toplevelIpcFingerprint(pair.toplevel) !== pair.snap) {
+                    refreshed = true;
                     break;
                 }
             }
@@ -782,7 +978,8 @@ Item {
         if (Hyprland.usingLua) {
             if (root.debug)
                 console.log("[WSBTN]", id, "no ws object, lua dispatch");
-            Hyprland.dispatch('hl.dsp.focus({ workspace = "' + id + '" })');
+
+            Hyprland.dispatch('hl.dsp.focus({ workspace = "' + root.luaStr(String(id)) + '" })');
         } else {
             if (root.debug)
                 console.log("[WSBTN]", id, "no ws object, classic dispatch");
@@ -879,7 +1076,7 @@ Item {
             Hyprland.refreshToplevels();
         } catch (e) {
             requested = false;
-            console.warn("[QS] refreshToplevels 失败: " + e);
+            console.warn("[QS] refreshToplevels failed: " + e);
         }
         if (requested)
             toplevelResyncPoll.restart();
@@ -912,7 +1109,7 @@ Item {
         running: root.name === "hyprland"
         onTriggered: {
             if (root.debug)
-                console.log("[QS] login resync 1 (openwindow 丢弃自愈)");
+                console.log("[QS] login resync 1 (openwindow drop self-heal)");
             root.requestToplevelResync("login-4s");
         }
     }
@@ -923,7 +1120,7 @@ Item {
         running: root.name === "hyprland"
         onTriggered: {
             if (root.debug)
-                console.log("[QS] login resync 2 (openwindow 丢弃自愈)");
+                console.log("[QS] login resync 2 (openwindow drop self-heal)");
             root.requestToplevelResync("login-12s");
         }
     }

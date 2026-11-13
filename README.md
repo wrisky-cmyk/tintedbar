@@ -47,7 +47,7 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 | `notify-send`（libnotify） | 重启提示的通知动作；缺失时图标仍可点，但不会弹出详情 |
 | `systemctl` / `loginctl` | 电源菜单的关机/重启/休眠/注销 |
 | `nm-applet` / `blueman-manager` / `pavucontrol` | 点网络 / 蓝牙 / 音量图标拉起的面板 |
-| `$TERMINAL`（兜底 `alacritty`） | 左栏终端按钮、点击温度/磁盘/CPU/内存时打开的 `top` |
+| `$TERMINAL`（兜底 `alacritty`，可带参数如 `"myterm --hold"`） | 左栏终端按钮、点击温度/磁盘/CPU/内存时打开的 `top` |
 
 **无需安装**：playerctl / pactl / wpctl / brightnessctl / grim / jq / python / Node。
 媒体走 MPRIS（D-Bus），音量走 PipeWire 服务，网速读 `/proc`，通知自己发。
