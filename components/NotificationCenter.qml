@@ -38,8 +38,13 @@ Item {
     property var history: []
 
     property bool historyLoaded: false
+    property bool historyLoadCorrupt: false
+
+    property int historyLoadGen: 0
 
     property bool historySettled: false
+
+    property var pendingReplay: []
 
     readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Style.home + "/.local/state")) + "/quickshell"
 
@@ -49,19 +54,33 @@ Item {
     onHistoryChanged: if (center.historyLoaded)
         center.saveHistory()
 
+    property bool historySaveDirty: false
+    property int historySaveFailures: 0
+
     function saveHistory() {
-        historySaveDebounce.restart();
+        if (center.historyLoadCorrupt)
+            return;
+        historySaveDirty = true;
+        if (!historySaveDebounce.running)
+            historySaveDebounce.start();
     }
 
     Timer {
         id: historySaveDebounce
         interval: 200
+        repeat: true
         onTriggered: {
-            if (historySave.running) {
-                restart();
+            if (!historySaveDirty) {
+                stop();
                 return;
             }
-            historySave.command = ["sh", "-c", Style.atomicWriteCmd(center.stateDir + "/notification-history.json", JSON.stringify(center.historyForSave()))];
+            if (historySave.running)
+                return;
+            historySaveDirty = false;
+
+            const d = Style.sq(center.stateDir);
+            historySave.command = ["sh", "-c", "umask 077; mkdir -p " + d + " && cat > " + d + "/notification-history.json.tmp && mv -f " + d + "/notification-history.json.tmp " + d + "/notification-history.json"];
+            historySave.stdinEnabled = true;
             historySave.running = true;
         }
     }
@@ -69,10 +88,51 @@ Item {
     Process {
         id: historySave
         running: false
-        onExited: exitCode => {
-            if (exitCode !== 0)
-                console.warn("[NOTIFY] history save failed, exitCode " + exitCode);
+        stdinEnabled: true
+        onStarted: {
+            historySave.write(JSON.stringify(center.historyForSave()));
+            historySave.stdinEnabled = false;
         }
+        onExited: exitCode => {
+            if (exitCode !== 0) {
+                historySaveFailures++;
+                console.warn("[NOTIFY] history save failed, exitCode " + exitCode + " (attempt " + historySaveFailures + ")");
+                if (historySaveFailures <= 3)
+                    historySaveRetry.restart();
+            } else {
+                historySaveFailures = 0;
+            }
+        }
+    }
+    Timer {
+        id: historySaveRetry
+        interval: 1000
+        repeat: false
+        onTriggered: if (!historySave.running)
+            center.saveHistory()
+    }
+
+    Process {
+        id: historyQuarantine
+        running: false
+        command: ["sh", "-c", "mv -f " + Style.sq(center.stateDir + "/notification-history.json") + " " + Style.sq(center.stateDir + "/notification-history.json.corrupt")]
+        onExited: code => {
+            if (code !== 0) {
+                console.warn("[NOTIFY] could not quarantine corrupt history, exit " + code);
+                return;
+            }
+            center.historyLoadCorrupt = false;
+
+            historyCorruptNotify.restart();
+            if (center.historyLoaded)
+                center.saveHistory();
+        }
+    }
+    Timer {
+        id: historyCorruptNotify
+        interval: 1500
+        repeat: false
+        onTriggered: Style.notifySimple(I18n.t("notif.historyCorrupt"), I18n.t("notif.historyCorruptBody"))
     }
 
     Process {
@@ -81,15 +141,33 @@ Item {
         command: ["sh", "-c", Style.readJsonCmd(center.stateDir + "/notification-history.json", "[]")]
         stdout: StdioCollector {
             onStreamFinished: {
+                const gen = center.historyLoadGen;
                 let list = [];
+                let parseOk = true;
                 try {
                     list = JSON.parse(text);
                 } catch (e) {
-                    list = [];
+                    parseOk = false;
                 }
+                if (!parseOk) {
+                    center.historyLoadCorrupt = true;
+                    console.warn("[NOTIFY] history JSON is corrupt; quarantining as .corrupt");
+                    historyQuarantine.running = true;
+                }
+                if (!parseOk)
+                    list = [];
 
                 if (!Array.isArray(list))
                     list = [];
+
+                list = list.slice(0, 500);
+
+                if (center.historyLoadGen !== gen) {
+                    center.historyLoaded = true;
+
+                    center.pendingReplay = [];
+                    return;
+                }
 
                 const out = [];
                 for (const e of list) {
@@ -111,6 +189,10 @@ Item {
 
                 center.history = center.history.concat(out);
                 center.historyLoaded = true;
+
+                for (const rn of center.pendingReplay)
+                    center.replayWriteback(rn);
+                center.pendingReplay = [];
             }
         }
     }
@@ -190,13 +272,20 @@ Item {
         for (const e of center.history) {
             if (!e)
                 continue;
-            const c = Object.assign({}, e);
-            c.appName = center.historyText(c.appName, 256);
-            c.summary = center.historyText(c.summary, 1024);
-            c.body = center.historyText(c.body, 4096);
-            c.appIcon = center.historyText(c.appIcon, 512);
-            c.image = center.historyText(c.image, 512);
-            c.desktopEntry = center.historyText(c.desktopEntry, 256);
+
+            const c = {
+                id: e.id,
+                time: e.time,
+                urgency: e.urgency,
+                open: !!e.open,
+                detail: !!e.detail
+            };
+            c.appName = center.historyText(e.appName, 256);
+            c.summary = center.historyText(e.summary, 1024);
+            c.body = center.historyText(e.body, 4096);
+            c.appIcon = center.historyText(e.appIcon, 512);
+            c.image = center.historyText(e.image, 512);
+            c.desktopEntry = center.historyText(e.desktopEntry, 256);
             if (e.members) {
                 const ms = [];
                 for (let i = 0; i < e.members.length && i < 20; i++) {
@@ -214,33 +303,6 @@ Item {
             out.push(c);
         }
 
-        const ARG_BUDGET = 120000;
-        let used = 2;
-        let keep = 0;
-        for (let i = 0; i < out.length; i++) {
-            const j = JSON.stringify(out[i]);
-            const need = center.utf8ByteLen(j) + 3 * (j.split("'").length - 1) + (keep > 0 ? 1 : 0);
-            if (used + need > ARG_BUDGET)
-                break;
-            used += need;
-            keep = i + 1;
-        }
-        if (keep === 0 && out.length > 0) {
-            const c0 = Object.assign({}, out[0]);
-            delete c0.members;
-            for (; ; ) {
-                const j0 = JSON.stringify(c0);
-                if (center.utf8ByteLen(j0) + 3 * (j0.split("'").length - 1) + 2 <= ARG_BUDGET)
-                    break;
-                if (c0.body === undefined || c0.body.length <= 64)
-                    break;
-                c0.body = c0.body.substring(0, Math.floor(c0.body.length / 2));
-            }
-            out.length = 0;
-            out.push(c0);
-        } else {
-            out.length = keep;
-        }
         return out;
     }
 
@@ -289,6 +351,26 @@ Item {
         center.history = list;
     }
 
+    function replayWriteback(n) {
+        const h = center.history;
+        for (let i = 0; i < h.length; i++) {
+            const e = h[i];
+            if (!e)
+                continue;
+            if (String(e.appName || "") === String(n.appName || "") && String(e.summary || "") === String(n.summary || "") && String(e.body || "") === String(n.body || "")) {
+                const copy = h.slice();
+
+                copy[i] = Object.assign({}, copy[i], {
+                    open: true,
+                    liveId: n.id
+                });
+                center.history = copy;
+                return;
+            }
+        }
+        center.pushEntry(center.snapshot(n, true));
+    }
+
     function applyHistoryLimit() {
         if (center.history.length > center.historyLimit)
             center.history = center.history.slice(0, center.historyLimit);
@@ -324,10 +406,12 @@ Item {
     function markClosed(id) {
         const list = center.history.slice();
         for (let i = 0; i < list.length; i++) {
-            if (list[i].id === id && list[i].open) {
-                list[i] = Object.assign({}, list[i], {
+            if ((list[i].id === id || list[i].liveId === id) && list[i].open) {
+                const upd = Object.assign({}, list[i], {
                     open: false
                 });
+                delete upd.liveId;
+                list[i] = upd;
                 center.history = list;
                 return;
             }
@@ -418,6 +502,7 @@ Item {
         center.history = [];
         center.hasUnread = false;
         center.dismissAllOpen();
+        center.historyLoadGen++;
     }
 
     NotificationServer {
@@ -430,6 +515,14 @@ Item {
         onNotification: n => {
             if (n.lastGeneration) {
                 n.tracked = true;
+
+                if (!center.historyLoaded) {
+                    center.pendingReplay = center.pendingReplay.concat([n]);
+
+                    Qt.callLater(center.trimTracked);
+                    return;
+                }
+                center.replayWriteback(n);
 
                 Qt.callLater(center.trimTracked);
                 return;

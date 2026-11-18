@@ -48,7 +48,7 @@ Module {
         }
     }
 
-    onClicked: Quickshell.execDetached(["nm-applet"])
+    onClicked: Style.probePanelApp(["nm-applet"])
 
     onRightClicked: qsRoot.netToggleWired("right-click")
 }

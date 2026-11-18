@@ -54,17 +54,17 @@ set_icon_theme() {
   local ini="$1"
   if [ ! -f "$ini" ]; then
     if [ "$mode" = dark ]; then
-      mkdir -p "${ini%/*}"
-      printf '[Settings]\ngtk-icon-theme-name=%s\n' "$target" > "$ini"
+      mkdir -p "${ini%/*}" || return 1
+      printf '[Settings]\ngtk-icon-theme-name=%s\n' "$target" > "$ini" || return 1
     fi
   elif grep -q '^gtk-icon-theme-name=' "$ini"; then
-    sed -i "s|^gtk-icon-theme-name=.*|gtk-icon-theme-name=$esc|" "$ini"
+    sed -i "s|^gtk-icon-theme-name=.*|gtk-icon-theme-name=$esc|" "$ini" || return 1
   elif grep -q '^\[Settings\]' "$ini"; then
-    sed -i "/^\[Settings\]/a gtk-icon-theme-name=$esc" "$ini"
+    sed -i "/^\[Settings\]/a gtk-icon-theme-name=$esc" "$ini" || return 1
   else
-    printf '\n[Settings]\ngtk-icon-theme-name=%s\n' "$target" >> "$ini"
+    printf '\n[Settings]\ngtk-icon-theme-name=%s\n' "$target" >> "$ini" || return 1
   fi
 }
-set_icon_theme "$cfg/gtk-3.0/settings.ini"
-set_icon_theme "$cfg/gtk-4.0/settings.ini"
+set_icon_theme "$cfg/gtk-3.0/settings.ini" || exit 1
+set_icon_theme "$cfg/gtk-4.0/settings.ini" || exit 1
 echo "icon-theme: $cur -> $target"

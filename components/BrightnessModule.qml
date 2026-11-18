@@ -96,14 +96,16 @@ Module {
     function setPct(p, how) {
         p = Math.round(p);
         if (!(p >= 0 && p <= 100)) {
-            console.log("[BRIGHT] " + how + " out of range: " + p);
+            if (Style.debug)
+                console.log("[BRIGHT] " + how + " out of range: " + p);
             return;
         }
         if (brightnessModule.backend === "" && !brightnessModule.preview)
             return;
-        if (brightnessModule.backend === "" && brightnessModule.preview) {
+        if (brightnessModule.backend === "") {
             brightnessModule.pct = p;
-            console.log("[BRIGHT] " + how + " → " + p + "%");
+            if (Style.debug)
+                console.log("[BRIGHT] " + how + " → " + p + "%");
             brightnessModule.writePct(p, how);
             return;
         }
@@ -123,7 +125,7 @@ Module {
             }
             brightnessModule.pendingPct = p;
             brightnessModule.pct = p;
-            if (how !== "popup-drag")
+            if (how !== "popup-drag" && Style.debug)
                 console.log("[BRIGHT] " + how + " → " + p + "% (queued)");
             return;
         }
@@ -133,7 +135,7 @@ Module {
             return;
         }
         brightnessModule.pct = p;
-        if (how !== "popup-drag")
+        if (how !== "popup-drag" && Style.debug)
             console.log("[BRIGHT] " + how + " → " + p + "%");
         brightnessModule.writePct(p, how);
     }
@@ -153,7 +155,7 @@ Module {
     Process {
         id: brightnessProbe
         running: true
-        command: ["bash", "-c", "for d in /sys/class/backlight/*; do [ -d \"$d\" ] && { echo sysfs; exit 0; }; done; " + "command -v ddcutil >/dev/null 2>&1 || exit 0; " + "bus=$(ddcutil detect 2>/dev/null | grep -m1 \"I2C bus\" | sed \"s/.*i2c-//\" | tr -d \"[:space:]\"); " + "[ -n \"$bus\" ] && echo \"ddc $bus\" || echo ddc"]
+        command: ["bash", "-c", "for d in /sys/class/backlight/*; do [ -d \"$d\" ] && { echo sysfs; exit 0; }; done; " + "command -v ddcutil >/dev/null 2>&1 || exit 0; " + "if command -v timeout >/dev/null 2>&1; then ddc='timeout 8 ddcutil'; else ddc=ddcutil; fi; " + "bus=$($ddc detect 2>/dev/null | grep -m1 \"I2C bus\" | sed \"s/.*i2c-//\" | tr -d \"[:space:]\"); " + "[ -n \"$bus\" ] && echo \"ddc $bus\" || echo ddc"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const t = text.trim();
@@ -168,6 +170,25 @@ Module {
                 }
             }
         }
+        onExited: exitCode => {
+            if (exitCode !== 0 || brightnessModule.backend === "") {
+                console.warn("[BRIGHT] startup probe failed/timed out (rc=" + exitCode + "), retry " + brightnessModule.probeFailures + "/2");
+                if (brightnessModule.probeFailures < 2) {
+                    brightnessModule.probeFailures++;
+                    brightnessProbeRetry.restart();
+                }
+            } else {
+                brightnessModule.probeFailures = 0;
+            }
+        }
+    }
+    property int probeFailures: 0
+    Timer {
+        id: brightnessProbeRetry
+        interval: 3000
+        repeat: false
+        onTriggered: if (brightnessModule.backend === "")
+            brightnessProbe.running = true
     }
 
     Process {
@@ -180,11 +201,14 @@ Module {
                 if (brightnessModule.backend === "sysfs") {
                     if (lines.length < 3) {
                         console.log("[BRIGHT] brightness read failed");
+
+                        brightnessModule.flushPending();
                         return;
                     }
                     const cur = Number(lines[1]), max = Number(lines[2]);
                     if (!isFinite(cur) || !isFinite(max) || max <= 0) {
                         console.log("[BRIGHT] brightness read failed");
+                        brightnessModule.flushPending();
                         return;
                     }
                     brightnessModule.sysfsDev = lines[0];
@@ -208,13 +232,17 @@ Module {
                             brightnessModule.backend = "";
                         } else {
                             console.log("[BRIGHT] ddcutil read failed, keep old value");
+
+                            brightnessModule.flushPending();
                         }
                         return;
                     }
                     const f = vcp.trim().split(/\s+/);
                     const cur = Number(f[3]), max = Number(f[4]);
-                    if (!isFinite(cur) || !isFinite(max) || max <= 0)
+                    if (!isFinite(cur) || !isFinite(max) || max <= 0) {
+                        brightnessModule.flushPending();
                         return;
+                    }
                     brightnessModule.ddcEverOk = true;
                     brightnessModule.busFallbackTried = false;
 

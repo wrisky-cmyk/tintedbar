@@ -20,6 +20,7 @@ Module {
 
     Poller {
         active: qsRoot.showKeyboard
+        timeoutMs: 3000
         interval: 3000
         command: ["sh", "-c", "n=0; c=0; s=; for k in numlock capslock; do v=; " + "for f in /sys/class/leds/*::$k/brightness; do " + "[ -e \"$f\" ] || break; read -r v < \"$f\"; break; done; " + "[ -n \"$v\" ] && s=1; " + "case $k in numlock) n=${v:-0};; capslock) c=${v:-0};; esac; done; " + "if [ -n \"$s\" ]; then printf 'led %s %s\\n' \"$n\" \"$c\"; " + (Style.compositor === "niri" ? "else printf 'led 0 0\\n'; fi" : "else exec hyprctl devices -j; fi")]
         onOutput: text => {

@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Window
-import Quickshell
 import Quickshell.Io
 import "."
 
@@ -17,14 +16,23 @@ OverlayPanel {
 
     property var entries: []
 
+    property bool clipBinMissing: false
+    property bool watcherMissing: false
+    readonly property string emptyHint: clipBinMissing ? I18n.t("clips.noBin") : watcherMissing ? I18n.t("clips.noStore") + "\nwl-paste --watch cliphist store" : I18n.t("clips.empty")
+
     readonly property int maxEntries: qsRoot.clipMaxEntries
     readonly property var filtered: {
         const q = picker.query.toLowerCase();
         const out = [];
-        for (const e of picker.entries)
-            if (q === "" || e.lower.indexOf(q) >= 0)
+        for (const e of picker.entries) {
+            if (q === "" || e.lower.indexOf(q) >= 0) {
                 out.push(e);
-        return out.slice(0, picker.maxEntries);
+
+                if (out.length >= picker.maxEntries)
+                    break;
+            }
+        }
+        return out;
     }
 
     function previewOf(line) {
@@ -39,8 +47,16 @@ OverlayPanel {
         input.text = "";
         picker.headerSel = 0;
 
+        list.currentIndex = 0;
+
         if (!clipsLoad.running)
             clipsLoad.running = true;
+
+        picker.clipBinMissing = false;
+        picker.watcherMissing = false;
+
+        if (!envProbe.running)
+            envProbe.running = true;
         input.forceActiveFocus();
     }
     function close() {
@@ -115,7 +131,7 @@ OverlayPanel {
             return;
         close();
 
-        copyProc.command = ["bash", "-c", "printf '%s\\n' " + Style.sq(line) + " | cliphist decode | wl-copy"];
+        copyProc.command = ["bash", "-c", "set -o pipefail; t=$(mktemp) || exit 1; " + "trap 'rm -f \"$t\"' EXIT; " + "printf '%s\\n' " + Style.sq(line) + " | cliphist decode > \"$t\" || exit 1; " + "[ -s \"$t\" ] || exit 1; wl-copy < \"$t\""];
         copyProc.running = true;
     }
 
@@ -145,13 +161,18 @@ OverlayPanel {
                 if (wipePendingReload)
                     return;
                 const out = [];
+
+                const loadCap = 1000;
                 for (const l of String(text).split("\n")) {
                     if (l === "")
                         continue;
+
                     out.push({
                         raw: l,
-                        lower: l.toLowerCase()
+                        lower: picker.previewOf(l).toLowerCase()
                     });
+                    if (out.length >= loadCap)
+                        break;
                 }
                 picker.entries = out;
 
@@ -161,8 +182,26 @@ OverlayPanel {
     }
 
     Process {
+        id: envProbe
+        running: false
+        command: ["sh", "-c", "command -v cliphist >/dev/null 2>&1 && echo bin=1 || echo bin=0; " + "pgrep -f 'wl-[p]aste' >/dev/null 2>&1 && echo watch=1 || echo watch=0"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const t = String(text);
+                picker.clipBinMissing = t.indexOf("bin=0") >= 0;
+                picker.watcherMissing = t.indexOf("watch=0") >= 0;
+            }
+        }
+    }
+
+    Process {
         id: copyProc
         running: false
+
+        onExited: code => {
+            if (code !== 0)
+                Style.notifySimple(I18n.t("clips.copyFailed"), "");
+        }
     }
 
     Process {
@@ -187,7 +226,12 @@ OverlayPanel {
         id: card
         width: 560
 
-        height: Math.max(420, Screen.height - 240)
+        readonly property int rowStride: 34
+        readonly property int chromeHeight: 64
+        height: {
+            const raw = Math.max(420, Screen.height - 240);
+            return Math.max(420, chromeHeight + Math.floor((raw - chromeHeight) / rowStride) * rowStride);
+        }
         anchors.centerIn: parent
         radius: 12
         color: Style.card
@@ -205,6 +249,26 @@ OverlayPanel {
 
         Keys.onLeftPressed: picker.adjustSel(-1)
         Keys.onRightPressed: picker.adjustSel(1)
+
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_PageUp) {
+                picker.headerSel = 0;
+                list.currentIndex = Math.max(0, list.currentIndex - 10);
+                event.accepted = true;
+            } else if (event.key === Qt.Key_PageDown) {
+                picker.headerSel = 0;
+                list.currentIndex = Math.min(Math.max(0, list.count - 1), Math.max(0, list.currentIndex) + 10);
+                event.accepted = true;
+            } else if (event.key === Qt.Key_Home) {
+                picker.headerSel = 0;
+                list.currentIndex = 0;
+                event.accepted = true;
+            } else if (event.key === Qt.Key_End) {
+                picker.headerSel = 0;
+                list.currentIndex = Math.max(0, list.count - 1);
+                event.accepted = true;
+            }
+        }
         Keys.onReturnPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
         Keys.onEnterPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
 
@@ -243,6 +307,26 @@ OverlayPanel {
                         }
                         Keys.onUpPressed: picker.selUp()
                         Keys.onDownPressed: picker.selDown()
+
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Home) {
+                                picker.headerSel = 0;
+                                list.currentIndex = 0;
+                                event.accepted = true;
+                            } else if (event.key === Qt.Key_End) {
+                                picker.headerSel = 0;
+                                list.currentIndex = Math.max(0, list.count - 1);
+                                event.accepted = true;
+                            } else if (event.key === Qt.Key_PageUp) {
+                                picker.headerSel = 0;
+                                list.currentIndex = Math.max(0, list.currentIndex - 10);
+                                event.accepted = true;
+                            } else if (event.key === Qt.Key_PageDown) {
+                                picker.headerSel = 0;
+                                list.currentIndex = Math.min(Math.max(0, list.count - 1), Math.max(0, list.currentIndex) + 10);
+                                event.accepted = true;
+                            }
+                        }
                         Keys.onReturnPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
                         Keys.onEnterPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
                         Text {
@@ -317,10 +401,15 @@ OverlayPanel {
 
                 ListView {
                     id: list
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+
+                    height: Math.floor(parent.height / card.rowStride) * card.rowStride
                     clip: true
                     spacing: 2
-                    model: picker.filtered
+
+                    model: picker.visible ? picker.filtered : []
                     currentIndex: 0
 
                     onCountChanged: {
@@ -357,6 +446,7 @@ OverlayPanel {
                             anchors.leftMargin: 8
                             anchors.rightMargin: 8
                             text: picker.previewOf(row.rawLine)
+                            textFormat: Text.PlainText
                             color: Style.text2
                             font.family: Style.cjk
                             font.pixelSize: 13
@@ -374,10 +464,18 @@ OverlayPanel {
                     }
                 }
 
+                ThinScrollBar {
+                    target: list
+                    anchors.top: list.top
+                    anchors.bottom: list.bottom
+                    anchors.right: list.right
+                    anchors.rightMargin: -10
+                }
+
                 Text {
                     anchors.centerIn: parent
                     visible: picker.filtered.length === 0
-                    text: picker.entries.length === 0 ? I18n.t("clips.empty") : I18n.t("clips.noMatch")
+                    text: picker.entries.length !== 0 ? I18n.t("clips.noMatch") : picker.emptyHint
                     color: Style.text3
                     font.family: Style.cjk
                     font.pixelSize: 13

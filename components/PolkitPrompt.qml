@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Wayland
 import Quickshell.Widgets
 import "."
@@ -68,11 +67,13 @@ OverlayPanel {
         if (Date.now() < prompt.lockoutUntil)
             return;
         field.text = "";
-        console.log("[POLKIT] submit() submitted");
+        if (Style.debug)
+            console.log("[POLKIT] submit() submitted");
         f.submit(v);
     }
 
     onFlowChanged: {
+        field.text = "";
         prompt.attempts = 0;
         prompt.lockoutUntil = 0;
         prompt.lockoutText = "";
@@ -98,14 +99,19 @@ OverlayPanel {
     }
 
     function cancel() {
+        field.text = "";
         const f = prompt.flow;
         if (f)
             f.cancelAuthenticationRequest();
     }
 
-    onShownChanged: if (prompt.shown) {
-        field.text = "";
-        field.forceActiveFocus();
+    onShownChanged: {
+        if (prompt.shown) {
+            field.text = "";
+            field.forceActiveFocus();
+        } else {
+            field.text = "";
+        }
     }
 
     Connections {
@@ -129,7 +135,8 @@ OverlayPanel {
             if (!f || !f.isCompleted)
                 return;
 
-            console.log("[POLKIT] request finished: " + (f.isCancelled ? "cancelled" : "authorized"));
+            if (Style.debug)
+                console.log("[POLKIT] request finished: " + (f.isCancelled ? "cancelled" : "authorized"));
         }
     }
 
@@ -258,6 +265,8 @@ OverlayPanel {
                     font.letterSpacing: 4
 
                     echoMode: TextInput.Password
+
+                    inputMethodHints: Qt.ImhHiddenText | Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
                     passwordCharacter: "\u2022"
                     selectionColor: Style.accent
                     selectedTextColor: Style.card

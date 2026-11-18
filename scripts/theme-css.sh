@@ -14,6 +14,11 @@ for root in "$HOME/.local/share/themes" /usr/share/themes; do
 done
 [ -n "$entry" ] || exit 1
 
+themes_root=$(dirname -- "${entry%/gtk-3.0/gtk-dark.css}")
+user_themes=$HOME/.local/share/themes
+system_themes=/usr/share/themes
+user_gtk3=${XDG_CONFIG_HOME:-$HOME/.config}/gtk-3.0
+
 declare -A seen=()
 declare -A defs=()
 nfiles=0
@@ -22,6 +27,8 @@ maxfiles=32
 walk() {
   local f=$1 real base imp line
   [ -f "$f" ] || return 0
+
+  [ "$(wc -c < "$f" 2>/dev/null || echo 0)" -le 1048576 ] || return 0
   real=$(readlink -f -- "$f" 2>/dev/null) || real=$f
   [ -z "${seen[$real]:-}" ] || return 0
   seen[$real]=1
@@ -36,8 +43,13 @@ walk() {
       http://*|https://*|data:*|//*) continue ;;
     esac
     case "$imp" in
-      /*) walk "$imp" ;;
-      *) walk "$base/$imp" ;;
+      /*) cand=$imp ;;
+      *) cand="$base/$imp" ;;
+    esac
+    real=$(readlink -f -- "$cand" 2>/dev/null) || continue
+    case "$real" in
+      "$themes_root"/*|"$user_themes"/*|"$system_themes"/*|"$user_gtk3"/*) walk "$real" ;;
+      *) continue ;;
     esac
 
   done < <(tr "'" '"' < "$f" | sed -n \

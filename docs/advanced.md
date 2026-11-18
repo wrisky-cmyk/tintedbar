@@ -30,6 +30,8 @@ printf 'auth include login\n' | sudo tee /etc/pam.d/quickshell-lock
 - **被锁在门外时**：切换到 TTY（`Ctrl+Alt+F2`）登录，或从另一台机器 SSH 进来。`login` 认证栈
   带有 `pam_faillock`（默认连续输错 3 次锁定 10 分钟），等待冷却或走 TTY 均可。
 - 回退方案：系统中若还保留 hyprlock，这份配置无法启动时可直接运行 `hyprlock` 应急。
+- 笔记本的锁屏右上角会显示电量（充电时带闪电标记），与栏上电池同一套图形；台式机没有电池，
+  什么都不显示。栏上电池图标的开关不影响它。
 - 锁屏未能真正锁上（PAM 放行的极少数情况）时会先发出一条系统通知告知，不会无提示地停留在
   未锁状态。
 
@@ -71,6 +73,8 @@ printf 'auth include login\n' | sudo tee /etc/pam.d/quickshell-lock
   探测不到显示器就不显示该模块）；麦克风走 PipeWire，优先控制占用流实际连接的输入源，
   多条流时优先默认源，链路与默认输入源都不可用时点击为空动作。
   sysfs 背光的写入依赖 systemd-logind，非 systemd 发行版上表现为"模块在、调整不生效"。
+- 蓝牙解阻断需要用户在 `rfkill` 组（`usermod -aG rfkill $USER`，重新登录生效）：
+  否则适配器被软阻断时"开蓝牙"点不开（仅日志有 rfkill 提示）。
 
 ## 版本与指纹
 
@@ -102,7 +106,7 @@ ssh-keygen -Y verify -n tintedbar-dist -f allowed_signers -I '<发布者身份>'
 | 栏没有出现 | 查看日志中的 `Failed to load`（热重载时也会输出）；语法错误时栏不会自行恢复 |
 | 图标显示为豆腐块 / 中文变成方框 | Nerd Font 首选缺失会在日志输出 `[FONT]` WARN，并自动改用其它已安装的 Nerd Font；若仍无图标，安装 v3+ Nerd Font，或在 `Style.qml` 顶部指定已安装的家族。中文方框说明系统缺少可用 CJK 字体 |
 | 天气不显示 | 检查设置中的“天气”开关、`weather.conf` 是否填写坐标，以及能否连接 Open-Meteo |
-| 剪贴板面板一直为空 | 合成器 autostart 中缺少 `wl-paste --watch cliphist store` |
+| 剪贴板面板一直为空 | 合成器 autostart 中缺少 `wl-paste --watch cliphist store`（cliphist 未装或写入端未跑时，面板空态会直接提示并附命令） |
 | 某个模块空白 | 多数是 D-Bus 服务未运行（NetworkManager / UPower / BlueZ / PipeWire） |
 | 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。内置屏拖动滑条时会实时跟随；外接屏松手后约 0.5~4 秒才跟上属正常，DDC/CI 在一次写入后会短暂拒绝后续命令。`quickshell ipc call brightness state` 可查 backend / percent |
 | 修改 `.qml` 后没有变化 | 保存的可能是未被加载的文件；在日志中搜索 `Reloading configuration` / `Configuration Loaded` |

@@ -24,6 +24,13 @@ Rectangle {
     radius: 8
     color: (stepMouse.containsMouse || srow.sel) ? Style.hover : "transparent"
 
+    MouseArea {
+        id: stepMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+    }
+
     Text {
         anchors.left: parent.left
         anchors.leftMargin: 8
@@ -93,12 +100,5 @@ Rectangle {
                 onClicked: srow.adjust(1)
             }
         }
-    }
-
-    MouseArea {
-        id: stepMouse
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
     }
 }

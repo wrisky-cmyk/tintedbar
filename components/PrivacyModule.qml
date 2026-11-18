@@ -26,17 +26,33 @@ Module {
     property var activeMicSources: []
     readonly property var source: {
         const fallback = Pipewire.defaultAudioSource;
-        const used = privacyModule.activeMicSources;
-        if (fallback) {
-            const fid = String(fallback.id);
-            for (const n of used)
-                if (n && String(n.id) === fid)
-                    return fallback;
+        try {
+            const used = privacyModule.activeMicSources;
+            if (fallback) {
+                const fid = String(fallback.id);
+                for (const n of used)
+                    if (n && String(n.id) === fid)
+                        return fallback;
+            }
+            return used.length > 0 ? used[0] : fallback;
+        } catch (e) {
+            return fallback;
         }
-        return used.length > 0 ? used[0] : fallback;
     }
-    readonly property var sourceAudio: (privacyModule.source && privacyModule.source.audio) ? privacyModule.source.audio : null
-    readonly property bool micMuted: privacyModule.sourceAudio ? privacyModule.sourceAudio.muted === true : false
+    readonly property var sourceAudio: {
+        try {
+            return (privacyModule.source && privacyModule.source.audio) ? privacyModule.source.audio : null;
+        } catch (e) {
+            return null;
+        }
+    }
+    readonly property bool micMuted: {
+        try {
+            return privacyModule.sourceAudio ? privacyModule.sourceAudio.muted === true : false;
+        } catch (e) {
+            return false;
+        }
+    }
     PwObjectTracker {
         objects: privacyModule.source ? [privacyModule.source] : []
     }

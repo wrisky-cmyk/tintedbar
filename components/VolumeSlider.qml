@@ -86,6 +86,18 @@ Item {
 
         property bool volDrag: false
 
+        property real wheelAccum: 0
+        onWheel: ev => {
+            if (ev.angleDelta.y === 0)
+                return;
+            wheelAccum += ev.angleDelta.y;
+            while (Math.abs(wheelAccum) >= 120) {
+                const dir = wheelAccum > 0 ? 1 : -1;
+                wheelAccum -= dir * 120;
+                volSlider.applyVolume(volSlider.value + dir * 0.05);
+            }
+        }
+
         function setFromX(px) {
             volSlider.applyVolume(px / Math.max(1, sliderArea.width));
         }
@@ -96,8 +108,12 @@ Item {
             sliderArea.setFromX(m.x);
         }
         onReleased: m => {
-            if (m.button === Qt.LeftButton)
-                sliderArea.volDrag = false;
+            if (m.button !== Qt.LeftButton)
+                return;
+            sliderArea.volDrag = false;
+
+            if (volSlider.audio)
+                volSlider.value = Number(volSlider.audio.volume) || 0;
         }
         onCanceled: sliderArea.volDrag = false
         onPositionChanged: m => {
@@ -108,20 +124,6 @@ Item {
         onClicked: m => {
             if (m.button === Qt.RightButton)
                 qsRoot.audioToggleMute("right-click(slider)");
-        }
-    }
-
-    WheelHandler {
-        property real accum: 0
-        onWheel: ev => {
-            if (ev.angleDelta.y === 0)
-                return;
-            accum += ev.angleDelta.y;
-            while (Math.abs(accum) >= 120) {
-                const dir = accum > 0 ? 1 : -1;
-                accum -= dir * 120;
-                volSlider.applyVolume(volSlider.value + dir * 0.02);
-            }
         }
     }
 

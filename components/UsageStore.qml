@@ -8,6 +8,8 @@ Item {
     id: store
 
     property var usage: ({})
+    property bool loaded: false
+    property bool pendingSave: false
 
     readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Style.home + "/.local/state")) + "/quickshell"
 
@@ -18,6 +20,7 @@ Item {
         const u = Object.assign({}, store.usage);
         u[k] = (u[k] || 0) + 1;
         store.usage = u;
+        store.pendingSave = true;
         saveDebounce.restart();
     }
 
@@ -39,6 +42,11 @@ Item {
                 for (const k in store.usage)
                     merged[k] = Math.max(merged[k] || 0, store.usage[k] || 0);
                 store.usage = merged;
+                store.loaded = true;
+                if (store.pendingSave) {
+                    store.pendingSave = false;
+                    saveDebounce.restart();
+                }
             }
         }
     }
@@ -46,14 +54,19 @@ Item {
     Process {
         id: usageSave
         running: false
-        onExited: if (exitCode !== 0)
-            console.warn("[USAGE] usage save failed rc=" + exitCode)
+
+        onExited: code => {
+            if (code !== 0)
+                console.warn("[USAGE] usage save failed rc=" + code);
+        }
     }
 
     Timer {
         id: saveDebounce
         interval: 200
         onTriggered: {
+            if (!store.loaded)
+                return;
             if (usageSave.running) {
                 restart();
                 return;

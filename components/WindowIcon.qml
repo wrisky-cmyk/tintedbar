@@ -10,7 +10,7 @@ Item {
     property var wsBtnRef
     property int iconSize: 18
 
-    readonly property bool pulsing: winIcon.wsBtnRef && winIcon.wsBtnRef.pulseHit(winIcon.toplevel)
+    readonly property bool pulsing: !!(winIcon.wsBtnRef && winIcon.wsBtnRef.pulseHit(winIcon.toplevel))
     SequentialAnimation on opacity {
         id: pulseAnim
         running: winIcon.pulsing && !winIcon.urgent
@@ -41,7 +41,8 @@ Item {
     readonly property bool urgent: toplevel ? toplevel.urgent === true : false
     SequentialAnimation on opacity {
         id: urgentAnim
-        running: winIcon.urgent && !winIcon.pulsing
+
+        running: winIcon.urgent
         loops: Animation.Infinite
         alwaysRunToEnd: false
         NumberAnimation {

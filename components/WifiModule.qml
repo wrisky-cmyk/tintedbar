@@ -90,10 +90,11 @@ Module {
             width: Math.min(implicitWidth, 160)
             elide: Text.ElideRight
             text: wifiModule.wifi ? wifiModule.wifi.name : ""
+            textFormat: Text.PlainText
         }
     }
 
-    onClicked: Quickshell.execDetached(["nm-applet"])
+    onClicked: Style.probePanelApp(["nm-applet"])
 
     onRightClicked: qsRoot.netToggleWifi("right-click")
 }

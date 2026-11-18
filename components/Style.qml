@@ -84,8 +84,18 @@ Item {
         stdout: SplitParser {
             onRead: line => root.handleInterfaceChange(line)
         }
-        onExited: schemeMonitorRetry.restart()
+        onExited: {
+            root.schemeMonitorFailures++;
+            if (root.schemeMonitorFailures > 5) {
+                console.warn("[STYLE] gsettings monitor keeps failing; giving up after " + root.schemeMonitorFailures + " attempts");
+                return;
+            }
+
+            schemeMonitorRetry.interval = Math.min(60000, 2000 * Math.pow(2, root.schemeMonitorFailures - 1));
+            schemeMonitorRetry.restart();
+        }
     }
+    property int schemeMonitorFailures: 0
     Timer {
         id: schemeMonitorRetry
         interval: 2000
@@ -102,6 +112,10 @@ Item {
             root.preferDarkGtk4 = root.parsePreferDark(text());
             root.syncDark();
         }
+        onLoadFailed: {
+            root.preferDarkGtk4 = -1;
+            root.syncDark();
+        }
         onFileChanged: reload()
     }
     FileView {
@@ -111,6 +125,10 @@ Item {
         watchChanges: true
         onLoaded: {
             root.preferDarkGtk3 = root.parsePreferDark(text());
+            root.syncDark();
+        }
+        onLoadFailed: {
+            root.preferDarkGtk3 = -1;
             root.syncDark();
         }
         onFileChanged: reload()
@@ -187,6 +205,7 @@ Item {
     }
 
     function handleInterfaceChange(line) {
+        root.schemeMonitorFailures = 0;
         const t = String(line);
         const i = t.indexOf(":");
         if (i < 0)
@@ -462,7 +481,7 @@ Item {
     Process {
         id: paletteScan
         running: true
-        command: ["sh", "-c", "grep -H -m1 '^@define-color theme_selected_bg_color' " + "$HOME/.local/share/themes/*/gtk-3.0/gtk-dark.css " + "/usr/share/themes/*/gtk-3.0/gtk-dark.css 2>/dev/null"]
+        command: ["sh", "-c", "grep -H -m1 '^@define-color theme_selected_bg_color' " + "\"$HOME\"/.local/share/themes/*/gtk-3.0/gtk-dark.css " + "/usr/share/themes/*/gtk-3.0/gtk-dark.css 2>/dev/null"]
         stdout: StdioCollector {
             onStreamFinished: root.adoptPaletteScan(text)
         }
@@ -531,7 +550,7 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.11.13"
+    readonly property string version: "26.11.18"
     readonly property string minQuickshellVersion: "0.3.2"
     property string runningQuickshellVersion: ""
     property bool quickshellVersionChecked: false
@@ -576,10 +595,8 @@ Item {
     }
 
     readonly property string fingerprintCmd: "find shell.qml components scripts icons -type f ! -name '.*' ! -name '*~' ! -name '*.swp' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8"
-    property string packedVersion: ""
     property string packedFingerprint: ""
     property string packedPackaging: ""
-    property string packedQuickshell: ""
     property string localFingerprint: ""
     readonly property bool packedCopy: packedFingerprint !== ""
 
@@ -598,10 +615,8 @@ Item {
                     console.log("[QS] manifest.json is not valid JSON, skip fingerprint check: " + e);
                     return;
                 }
-                root.packedVersion = String(o.version || "");
                 root.packedFingerprint = String(o.fingerprint || "");
                 root.packedPackaging = String(o.packaging || "");
-                root.packedQuickshell = String(o.quickshell || "");
                 if (root.packedFingerprint !== "")
                     fingerprintCalc.running = true;
                 else
@@ -626,7 +641,7 @@ Item {
 
     property bool debug: Quickshell.env("QS_DEBUG") === "1"
 
-    readonly property string home: Quickshell.env("HOME") || ""
+    readonly property string home: Quickshell.env("HOME") || Quickshell.env("TMPDIR") || "/tmp"
 
     readonly property string configDir: Quickshell.shellDir
 
@@ -634,7 +649,7 @@ Item {
         return Compositor.modelValues(model);
     }
 
-    property var desktopEntryCache: ({})
+    property var desktopEntryCache: Object.create(null)
 
     function appForClass(cls) {
         if (!cls)
@@ -673,7 +688,7 @@ Item {
         if (!root.nerdFontOk)
             console.warn("[FONT] preferred nerd font \"" + root.nerdFont + "\" missing" + (root.nerd !== "" ? ", using \"" + root.nerd + "\"" : ", no fallback (nerd icon glyphs will be missing)"));
         DesktopEntries.applicationsChanged.connect(() => {
-            root.desktopEntryCache = {};
+            root.desktopEntryCache = Object.create(null);
         });
         root.btSync();
     }
@@ -707,14 +722,17 @@ Item {
         return Compositor.sq(s);
     }
 
+    function gvStr(v) {
+        return "'" + String(v).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
+    }
+
     function atomicWriteCmd(path, json) {
         const p = String(path);
         const slash = p.lastIndexOf("/");
 
         const dir = slash < 0 ? "." : p.substring(0, slash);
 
-        const tmp = path + "." + Date.now() + ".tmp";
-        return "umask 077; mkdir -p " + sq(dir) + " && printf '%s' " + sq(json) + " > " + sq(tmp) + " && mv -f " + sq(tmp) + " " + sq(path);
+        return "umask 077; mkdir -p " + sq(dir) + " && " + "t=$(mktemp " + sq(path + ".XXXXXX") + ") || exit 1; " + "printf '%s' " + sq(json) + " > \"$t\" && mv -f \"$t\" " + sq(path) + " || { rm -f \"$t\"; exit 1; }";
     }
 
     function readJsonCmd(path, fallback) {
@@ -1015,14 +1033,23 @@ Item {
     Poller {
         id: btPoller
         active: !root.btCacheTrusted
+        timeoutMs: 8000
 
         interval: (root.btAdapter() !== null || root.btProbeKnown) ? 15000 : 60000
         command: ["busctl", "--system", "get-property", "org.bluez", root.btAdapter() ? String(root.btAdapter().dbusPath) : "/org/bluez/hci0", "org.bluez.Adapter1", "Powered"]
         onOutput: text => {
             const t = String(text).trim();
 
+            if (t.indexOf("b ") !== 0) {
+                if (!root.btProbeLogged) {
+                    root.btProbeLogged = true;
+                    console.warn("[BT] busctl probe returned no parseable value; keeping last state");
+                }
+                return;
+            }
+
             const wantOpen = root.btWantOpen;
-            root.btProbeKnown = t.indexOf("b ") === 0;
+            root.btProbeKnown = true;
             root.btProbeOn = t.indexOf("true") >= 0;
             root.btSync();
 
@@ -1141,5 +1168,66 @@ Item {
         if (seconds === undefined || seconds)
             s += ":" + root.pad(d.getSeconds());
         return s;
+    }
+
+    function probePanelApp(cmd) {
+        const words = String(cmd[0]).trim().split(/\s+/);
+        const argv = ["bash", "-c", 'exec "$@"', "sh"].concat(words, cmd.slice(1));
+        Quickshell.execDetached(argv);
+        if (panelBinProbe.running)
+            return;
+
+        panelBinProbe.round++;
+        panelBinProbe.myRound = panelBinProbe.round;
+        panelBinProbe.name = words[0];
+        panelBinProbe.command = ["sh", "-c", 'command -v "$1" >/dev/null 2>&1 || echo missing', "sh", words[0]];
+        panelBinProbe.running = true;
+    }
+
+    function notifyMissingBin(name) {
+        Style.notifySimple(I18n.t("hint.appMissing"), name);
+    }
+
+    function notifySimple(title, body) {
+        if (notifyProc.running) {
+            root.notifyPending = {
+                title: title,
+                body: body
+            };
+            return;
+        }
+        notifyProc.command = ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", title, body, "[]", "{\"urgency\": <byte 1>}", 4000];
+        notifyProc.running = true;
+    }
+
+    property var notifyPending: null
+
+    Process {
+        id: notifyProc
+        running: false
+        onExited: code => {
+            if (code !== 0)
+                console.warn("[NOTIFY] gdbus notify failed, exit " + code);
+            const q = root.notifyPending;
+            root.notifyPending = null;
+            if (q)
+                root.notifySimple(q.title, q.body);
+        }
+    }
+
+    Process {
+        id: panelBinProbe
+        property string name: ""
+        property int round: 0
+        property int myRound: 0
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (panelBinProbe.myRound === panelBinProbe.round && panelBinProbe.name !== "" && String(text).trim() !== "")
+                    root.notifyMissingBin(panelBinProbe.name);
+                if (panelBinProbe.myRound === panelBinProbe.round)
+                    panelBinProbe.name = "";
+            }
+        }
     }
 }

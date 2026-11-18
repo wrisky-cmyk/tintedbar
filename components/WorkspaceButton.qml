@@ -57,7 +57,8 @@ Item {
 
     function syncWindows() {
         const current = wsBtn.niri ? Compositor.windowsForWorkspace(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? Compositor.modelValues(wsBtn.ws.toplevels) : []);
-        const same = (a, b) => wsBtn.niri ? (a && b && a.__wid === b.__wid) : a === b;
+
+        const same = (a, b) => sameToplevel(a, b);
         for (let i = iconModel.count - 1; i >= 0; i--) {
             const t = iconModel.get(i).toplevel;
             if (!current.some(c => same(c, t)))
@@ -291,14 +292,20 @@ Item {
         })
 
     property bool refreshQueued: false
+
+    Timer {
+        id: refreshCoalesce
+        interval: 0
+        onTriggered: {
+            wsBtn.refreshQueued = false;
+            wsBtn.refresh();
+        }
+    }
     function scheduleRefresh() {
         if (wsBtn.refreshQueued)
             return;
         wsBtn.refreshQueued = true;
-        Qt.callLater(function () {
-            wsBtn.refreshQueued = false;
-            wsBtn.refresh();
-        });
+        refreshCoalesce.restart();
     }
 
     Connections {

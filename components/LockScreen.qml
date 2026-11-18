@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Pam
+import Quickshell.Services.UPower
 import Quickshell.Wayland
 import "."
 
@@ -47,11 +48,9 @@ Item {
 
     readonly property string userInitial: lockScreen.userName.length > 0 ? lockScreen.userName[0].toUpperCase() : "?"
 
-    signal unlocked
     signal authFailed
 
     readonly property int unlockFadeMs: 160
-    readonly property alias secure: lock.secure
 
     property int attempts: 0
     property bool pamReady: false
@@ -87,6 +86,8 @@ Item {
         lockScreen.attempts = 0;
         lockScreen.lockoutUntil = 0;
         lockoutTimer.stop();
+
+        unlockTimer.stop();
         lockScreen.failText = "";
         lockScreen.busy = false;
         lockScreen.unlocking = false;
@@ -113,7 +114,6 @@ Item {
         pamStartWatchdog.stop();
         if (pam.active)
             pam.abort();
-        lockScreen.unlocked();
     }
 
     function startPam(watchdogInterval) {
@@ -327,8 +327,13 @@ Item {
         id: secureCheck
         interval: 5000
         onTriggered: {
-            if (!lockScreen.locked || lock.secure) {
+            if (!lockScreen.locked) {
                 lockScreen.secureStayLogged = false;
+                return;
+            }
+            if (lock.secure) {
+                lockScreen.secureStayLogged = false;
+                restart();
                 return;
             }
             if (lockScreen.surfaceSeen) {
@@ -356,8 +361,11 @@ Item {
         config: lockScreen.activePamConfig
 
         onPamMessage: {
-            if (pam.responseRequired)
+            if (pam.responseRequired) {
                 lockScreen.pamReady = true;
+
+                lockScreen.busy = false;
+            }
 
             if (pam.messageIsError && pam.message !== "")
                 lockScreen.failText = pam.message;
@@ -493,6 +501,63 @@ Item {
                     }
                 }
 
+                Row {
+                    id: batChip
+                    visible: batDev !== null
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.topMargin: 33
+                    anchors.rightMargin: 28 + (lockScreen.capsOn ? capsChip.width + 12 : 0)
+                    spacing: 5
+
+                    readonly property var batDev: Style.laptopBattery()
+                    readonly property bool charging: batDev && batDev.state === UPowerDeviceState.Charging
+
+                    Rectangle {
+                        width: 34
+                        height: 16
+                        radius: 3
+                        color: "transparent"
+                        border.width: 1.5
+                        border.color: Style.lockText2
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.max(0, Math.round((parent.width - 4) * (batChip.batDev ? batChip.batDev.percentage : 0)))
+                            height: parent.height - 5
+                            radius: 1
+                            color: Style.lockText2
+                            opacity: 0.5
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: batChip.batDev ? String(Math.round(batChip.batDev.percentage * 100)) : ""
+                            color: Style.lockText
+                            font.family: Style.nerd
+                            font.pixelSize: 11
+                        }
+                    }
+
+                    Rectangle {
+                        width: 2.5
+                        height: 7
+                        radius: 1
+                        color: Style.lockText2
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        visible: batChip.charging
+                        text: "\uF0E7"
+                        color: Style.lockText2
+                        font.family: Style.nerd
+                        font.pixelSize: 12
+                    }
+                }
+
                 Column {
                     id: leftStack
                     anchors.left: parent.left
@@ -560,6 +625,7 @@ Item {
 
                             font.letterSpacing: lockScreen.hideInput ? 4 : 0
                             echoMode: lockScreen.hideInput ? TextInput.Password : TextInput.Normal
+                            inputMethodHints: Qt.ImhHiddenText | Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
                             passwordCharacter: "\u2022"
                             selectionColor: Style.accent
                             selectedTextColor: Style.card

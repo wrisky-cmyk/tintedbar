@@ -15,7 +15,7 @@ Module {
 
     contentYOffset: -1
 
-    contentWidth: mprisViewport.width
+    contentWidth: mprisRail.width
 
     readonly property var player: {
         const ps = Style.modelValues(Mpris.players);
@@ -29,80 +29,161 @@ Module {
         return ps.length ? ps[0] : null;
     }
 
+    readonly property bool playing: mprisModule.player !== null && mprisModule.player.playbackState === MprisPlaybackState.Playing
+
+    readonly property int iconGap: 4
+
     Item {
-        id: mprisViewport
+        id: mprisRail
 
         x: (parent.width - width) / 2
-        y: (parent.height - height) / 2
-        width: Math.min(mprisText.implicitWidth, 260)
-        height: mprisText.implicitHeight
-        clip: true
+        y: (parent.height - mprisModule.progressReserve - height) / 2
+        width: mprisIconText.implicitWidth + mprisModule.iconGap + mprisViewport.width
+        height: mprisIconText.implicitHeight
 
-        readonly property real overflow: Math.max(0, mprisText.implicitWidth - width)
-
-        Text {
-            id: mprisText
-
-            textFormat: Text.RichText
-            color: Style.text1
-            font.family: Style.cjk
-
-            font.pixelSize: 14
-            text: {
-                const p = mprisModule.player;
-                if (!p)
-                    return "";
-                const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const artist = String(p.trackArtists || "");
-                const album = String(p.trackAlbum || "");
-
-                const icon = '<span style="font-size:18px">' + (p.playbackState !== MprisPlaybackState.Playing ? "\uf04c" : "\uf04b") + '</span>';
-
-                const dim = '<font color="' + Style.text3 + '">';
-                const close = "</font>";
-                const title = esc(p.trackTitle);
-                let segs = [];
-                if (artist)
-                    segs.push(dim + esc(artist) + close);
-                if (album)
-                    segs.push(dim + esc(album) + close);
-                if (title)
-                    segs.push(title);
-                return icon + " " + segs.join(" - ");
+        opacity: mprisModule.playing ? 1.0 : 0.65
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 150
             }
-
-            onTextChanged: Qt.callLater(function () {
-                if (mprisModule.visible && mprisViewport.overflow > 0)
-                    marquee.restart();
-            })
         }
 
-        SequentialAnimation {
-            id: marquee
-            running: mprisModule.visible && mprisViewport.overflow > 0
-            loops: Animation.Infinite
+        Text {
+            id: mprisIconText
+            x: 0
+            y: 0
+            color: Style.text1
+            font.family: Style.cjk
+            font.pixelSize: 18
+            text: mprisModule.playing ? "\uf04b" : "\uf04c"
+        }
 
-            onRunningChanged: if (!marquee.running)
-                mprisText.x = 0
-            PauseAnimation {
-                duration: 1600
+        Item {
+            id: mprisViewport
+            x: mprisIconText.implicitWidth + mprisModule.iconGap
+
+            y: mprisIconText.baselineOffset - mprisText.baselineOffset
+            width: Math.min(mprisText.implicitWidth, 260)
+            height: mprisText.implicitHeight
+            clip: true
+
+            readonly property real overflow: Math.max(0, mprisText.implicitWidth - width)
+
+            Text {
+                id: mprisText
+
+                textFormat: Text.RichText
+                color: Style.text1
+                font.family: Style.cjk
+
+                font.pixelSize: 14
+                text: {
+                    const p = mprisModule.player;
+                    if (!p)
+                        return "";
+                    const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    const artist = String(p.trackArtists || "");
+                    const album = String(p.trackAlbum || "");
+
+                    const dim = '<font color="' + Style.text3 + '">';
+                    const close = "</font>";
+                    const sep = dim + " - " + close;
+                    const title = esc(p.trackTitle);
+                    let segs = [];
+                    if (title)
+                        segs.push(title);
+                    if (artist)
+                        segs.push(dim + esc(artist) + close);
+                    if (album)
+                        segs.push(dim + esc(album) + close);
+                    return segs.join(sep);
+                }
+
+                onTextChanged: Qt.callLater(function () {
+                    if (mprisModule && mprisViewport && mprisModule.visible && mprisViewport.overflow > 0)
+                        marquee.restart();
+                })
             }
+
+            SequentialAnimation {
+                id: marquee
+                running: mprisModule.visible && mprisViewport.overflow > 0
+                loops: Animation.Infinite
+
+                onRunningChanged: if (!marquee.running)
+                    mprisText.x = 0
+                PauseAnimation {
+                    duration: 1600
+                }
+                NumberAnimation {
+                    target: mprisText
+                    property: "x"
+                    to: -mprisViewport.overflow
+                    duration: Math.max(1800, mprisViewport.overflow * 22)
+                    easing.type: Easing.InOutSine
+                }
+                PauseAnimation {
+                    duration: 1600
+                }
+                NumberAnimation {
+                    target: mprisText
+                    property: "x"
+                    to: 0
+                    duration: Math.max(1800, mprisViewport.overflow * 22)
+                    easing.type: Easing.InOutSine
+                }
+            }
+        }
+    }
+
+    property real playedSec: 0
+    property real lastReportedPos: -1
+    readonly property real totalSec: mprisModule.player ? Math.max(0, Number(mprisModule.player.length) || 0) : 0
+
+    readonly property real progressFrac: mprisModule.totalSec > 0 ? Math.max(0, Math.min(1, mprisModule.playedSec / mprisModule.totalSec)) : -1
+
+    readonly property int progressReserve: mprisModule.progressFrac >= 0 ? 2 : 0
+
+    Timer {
+        interval: 1000
+        repeat: true
+        running: mprisModule.visible && mprisModule.totalSec > 0
+        onTriggered: {
+            const p = mprisModule.player;
+            if (!p)
+                return;
+            const reported = Math.max(0, Number(p.position) || 0);
+            if (Math.abs(reported - mprisModule.lastReportedPos) > 0.05)
+                mprisModule.playedSec = reported;
+            else if (mprisModule.playing)
+                mprisModule.playedSec = Math.min(mprisModule.totalSec, mprisModule.playedSec + 1);
+            mprisModule.lastReportedPos = reported;
+        }
+    }
+
+    Rectangle {
+        visible: mprisModule.progressFrac >= 0
+        x: mprisIconText.implicitWidth + mprisModule.iconGap
+        y: mprisModule.implicitHeight - 2 - mprisModule.contentYOffset
+        width: mprisViewport.width
+        height: 2
+        radius: 1
+        color: Style.trough
+    }
+
+    Rectangle {
+        visible: mprisModule.progressFrac >= 0
+        x: mprisIconText.implicitWidth + mprisModule.iconGap
+        y: mprisModule.implicitHeight - 2 - mprisModule.contentYOffset
+        width: mprisViewport.width * Math.max(0, mprisModule.progressFrac)
+        height: 2
+        radius: 1
+        color: Style.accent
+        opacity: mprisModule.playing ? 0.85 : 0.45
+        Behavior on width {
             NumberAnimation {
-                target: mprisText
-                property: "x"
-                to: -mprisViewport.overflow
-                duration: Math.max(1800, mprisViewport.overflow * 22)
-                easing.type: Easing.InOutSine
-            }
-            PauseAnimation {
-                duration: 1600
-            }
-            NumberAnimation {
-                target: mprisText
-                property: "x"
-                to: 0
-                duration: Math.max(1800, mprisViewport.overflow * 22)
-                easing.type: Easing.InOutSine
+                duration: 950
+                easing.type: Easing.Linear
             }
         }
     }
@@ -144,6 +225,9 @@ Module {
 
     property bool testToggled: false
     onPlayerChanged: {
+        const p = mprisModule.player;
+        mprisModule.playedSec = p ? Math.max(0, Number(p.position) || 0) : 0;
+        mprisModule.lastReportedPos = p ? Math.max(0, Number(p.position) || 0) : -1;
         if (Style.debug)
             console.log("[MPRISW] player:", player ? String(player.identity) : "null", "| textIW:", mprisText.implicitWidth, "| vpW:", mprisViewport.width);
         if (!Style.debug || !mprisModule.player || mprisModule.testToggled)

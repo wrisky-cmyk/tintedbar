@@ -7,6 +7,8 @@ Item {
     property bool active: true
     property int interval: 1000
 
+    property int timeoutMs: 0
+
     property var command: []
 
     property string text: ""
@@ -33,6 +35,12 @@ Item {
 
     property bool kickQueued: false
 
+    function stop() {
+        poller.kickQueued = false;
+        if (proc.running)
+            proc.running = false;
+    }
+
     Process {
         id: proc
         running: false
@@ -53,6 +61,19 @@ Item {
                 poller.text = text;
                 poller.output(text);
             }
+        }
+    }
+
+    Timer {
+        id: pollerWatchdog
+        interval: Math.max(1000, poller.timeoutMs)
+        repeat: false
+        running: poller.timeoutMs > 0 && proc.running
+        onTriggered: {
+            if (!proc.running)
+                return;
+            console.warn("[POLLER] command timed out after " + poller.timeoutMs + "ms, killing");
+            proc.running = false;
         }
     }
 

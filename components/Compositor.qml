@@ -33,18 +33,27 @@ Item {
 
     property var niriLayoutNames: []
 
+    property int niriEventGen: 0
+
+    property int niriEventBackoffMs: 1000
+    property int niriSnapshotEventGen: -1
+
     signal compositorUpdated
 
     Process {
         id: niriSnapshot
         running: root.name === "niri"
+        onStarted: root.niriSnapshotEventGen = root.niriEventGen
         command: ["sh", "-c", "for i in $(seq 1 50); do [ -S \"$NIRI_SOCKET\" ] && break; sleep 0.2; done; " + "niri msg --json windows && printf '\n--WS--\n' && " + "niri msg --json workspaces && printf '\n--DONE--\n'"]
         stdout: StdioCollector {
             onStreamFinished: {
+                const snapGen = root.niriSnapshotEventGen;
                 let sawComplete = false;
                 const stage = {
                     s: "windows"
                 };
+                const winArrs = [];
+                const wsArrs = [];
                 for (const line of String(text).split("\n")) {
                     const t = line.trim();
                     if (t === "")
@@ -60,12 +69,25 @@ Item {
                     try {
                         const arr = JSON.parse(t);
                         if (stage.s === "windows")
-                            root.applyNiriWindows(arr);
+                            winArrs.push(arr);
                         else
-                            root.applyNiriWorkspaces(arr);
+                            wsArrs.push(arr);
                     } catch (e) {}
                 }
+
+                if (root.niriEventGen !== snapGen) {
+                    if (root.debug)
+                        console.log("[NIRI] discard stale snapshot (events advanced)");
+                    root.compositorUpdated();
+                    return;
+                }
+                for (const arr of winArrs)
+                    root.applyNiriWindows(arr);
+                for (const arr of wsArrs)
+                    root.applyNiriWorkspaces(arr);
                 root.compositorUpdated();
+                if (sawComplete)
+                    niriSnapshotRetry.retryCount = 0;
                 if (!sawComplete && root.name === "niri" && niriSnapshotRetry.retryCount < 3)
                     niriSnapshotRetry.restart();
             }
@@ -89,7 +111,11 @@ Item {
         stdout: SplitParser {
             onRead: data => root.handleNiriEvent(data)
         }
-        onExited: niriEventRetry.restart()
+        onExited: {
+            root.niriEventBackoffMs = Math.min(30000, root.niriEventBackoffMs * 2);
+            niriEventRetry.interval = root.niriEventBackoffMs;
+            niriEventRetry.restart();
+        }
     }
     Timer {
         id: niriEventRetry
@@ -99,6 +125,8 @@ Item {
     }
 
     function applyNiriWindows(arr) {
+        if (!Array.isArray(arr))
+            return;
         const kept = [];
         for (const w of arr) {
             let e = null;
@@ -185,6 +213,8 @@ Item {
     }
 
     function applyNiriWorkspaces(arr) {
+        if (!Array.isArray(arr))
+            return;
         const out = [];
         for (const w of arr)
             out.push({
@@ -211,15 +241,25 @@ Item {
         } catch (e) {
             return;
         }
+
+        if (!ev || typeof ev !== "object" || Array.isArray(ev))
+            return;
+        if (root.niriEventBackoffMs !== 1000) {
+            root.niriEventBackoffMs = 1000;
+            niriEventRetry.interval = 1000;
+        }
+        root.niriEventGen++;
         const key = Object.keys(ev)[0];
         const v = ev[key];
+        if (v === null || typeof v !== "object" || Array.isArray(v))
+            return;
         if (key === "WorkspacesChanged") {
             root.applyNiriWorkspaces(v.workspaces);
         } else if (key === "WorkspaceActivated") {
-            const act = root.niriWsList.find(ws => ws.id === v.id);
+            const act = root.niriWsList.find(ws => String(ws.id) === String(v.id));
             if (v.focused === false && act) {
                 for (const ws of root.niriWsList) {
-                    if (ws.id === v.id)
+                    if (String(ws.id) === String(v.id))
                         ws.focused = true;
                     else if (ws.focused && ws.output === act.output)
                         ws.focused = false;
@@ -227,7 +267,7 @@ Item {
                 root.niriWsList = root.niriWsList.slice();
             } else if (v.focused !== false) {
                 for (const ws of root.niriWsList)
-                    ws.focused = ws.id === v.id;
+                    ws.focused = String(ws.id) === String(v.id);
 
                 root.niriWsList = root.niriWsList.slice();
                 for (const ws of root.niriWsList)
@@ -263,6 +303,12 @@ Item {
                 found.obj.urgent = urgent;
                 found.wsid = w.workspace_id;
                 found.focused = focused;
+
+                if (root.niriTitlePending[String(w.id)] !== undefined) {
+                    const np = Object.assign({}, root.niriTitlePending);
+                    delete np[String(w.id)];
+                    root.niriTitlePending = np;
+                }
 
                 root.niriWindows = root.niriWindows.slice();
             } else {
@@ -659,12 +705,7 @@ Item {
         let bestAddr = "";
         for (const ws of root.modelValues(Hyprland.workspaces)) {
             for (const t of root.modelValues(ws.toplevels)) {
-                let cls = "";
-                try {
-                    cls = (t.wayland && t.wayland.appId) ? String(t.wayland.appId) : (t.lastIpcObject ? String(t.lastIpcObject["class"] || "") : "");
-                } catch (e) {
-                    cls = "";
-                }
+                const cls = toplevelClass(t);
                 if (root.debug)
                     console.log("[FOCUS] scan class=" + cls);
                 if (!root.matchKeys(cls, keys))
@@ -785,20 +826,27 @@ Item {
         root.notificationPulseRefreshing = true;
         root.notificationPulsePending = false;
         root.notificationPulseSentinels = [];
-        for (const ws of root.modelValues(Hyprland.workspaces)) {
-            for (const t of root.modelValues(ws.toplevels)) {
-                if (t)
-                    root.notificationPulseSentinels.push({
-                        toplevel: t,
-                        snap: root.toplevelIpcFingerprint(t)
-                    });
+
+        try {
+            for (const ws of root.modelValues(Hyprland.workspaces)) {
+                for (const t of root.modelValues(ws.toplevels)) {
+                    if (t)
+                        root.notificationPulseSentinels.push({
+                            toplevel: t,
+                            snap: root.toplevelIpcFingerprint(t)
+                        });
+                }
             }
+            if (root.debug)
+                console.log("[PULSE] refresh keys=" + JSON.stringify(root.notificationPulseKeys));
+            Hyprland.refreshToplevels();
+            pulseRefreshTimer.attempts = 0;
+            pulseRefreshTimer.restart();
+        } catch (e) {
+            console.warn("[PULSE] refreshToplevels failed: " + e);
+            root.notificationPulseRefreshing = false;
+            root.finishNotificationPulse(false);
         }
-        if (root.debug)
-            console.log("[PULSE] refresh keys=" + JSON.stringify(root.notificationPulseKeys));
-        Hyprland.refreshToplevels();
-        pulseRefreshTimer.attempts = 0;
-        pulseRefreshTimer.restart();
     }
 
     function finishNotificationPulse(fresh) {
@@ -896,7 +944,8 @@ Item {
     }
 
     function focusWindowByAddress(cls, addr) {
-        const pattern = addr !== "" ? "address:" + addr : "class:" + cls;
+        const safeCls = root.dispatchToken(cls);
+        const pattern = addr !== "" ? "address:" + addr : "class:" + safeCls;
 
         if (Hyprland.usingLua) {
             Hyprland.dispatch('hl.dsp.focus({ window = "' + root.luaStr(pattern) + '" })');
@@ -933,7 +982,11 @@ Item {
     }
 
     function luaStr(s) {
-        return String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+        return String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+    }
+
+    function dispatchToken(s) {
+        return String(s).replace(/[\r\n\u0000]/g, "");
     }
 
     function workspaceForId(id) {

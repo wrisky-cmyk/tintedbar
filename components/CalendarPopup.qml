@@ -50,6 +50,13 @@ PopupWindow {
 
     property date today: new Date()
 
+    Timer {
+        interval: 60000
+        repeat: true
+        running: calendarPopup.visible
+        onTriggered: calendarPopup.today = new Date()
+    }
+
     property bool showLunar: qsRoot.showLunar
 
     readonly property real cellW: (calendarPopup.width - 20) / 7
@@ -187,7 +194,7 @@ PopupWindow {
 
                 Repeater {
 
-                    model: calendarPopup.gridRows * 7
+                    model: calendarPopup.visible ? calendarPopup.gridRows * 7 : 0
 
                     delegate: Item {
                         width: calendarPopup.cellW

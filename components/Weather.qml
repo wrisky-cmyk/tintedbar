@@ -6,7 +6,7 @@ import "."
 Item {
     id: wx
 
-    readonly property string home: Quickshell.env("HOME") || ""
+    readonly property string home: Quickshell.env("HOME") || Quickshell.env("TMPDIR") || "/tmp"
 
     readonly property string confPath: Style.configDir + "/weather.conf"
     readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (wx.home + "/.local/state")) + "/quickshell"
@@ -46,13 +46,55 @@ Item {
 
     readonly property string url: "https://api.open-meteo.com/v1/forecast" + "?latitude=" + wx.lat + "&longitude=" + wx.lon + "&current=temperature_2m,apparent_temperature,relative_humidity_2m," + "wind_speed_10m,weather_code,is_day" + "&daily=weather_code,temperature_2m_max,temperature_2m_min" + "&timezone=auto&forecast_days=7"
 
+    property string fallbackIp: ""
+    property bool useResolve: false
+
+    property bool fallbackKickPending: false
+
+    function fetchCommand() {
+        const cmd = ["curl", "-fsS", "-m", "20", "--connect-timeout", "5", "--max-filesize", "1048576"];
+        if (wx.useResolve && wx.fallbackIp !== "")
+            cmd.push("--resolve", "api.open-meteo.com:443:" + wx.fallbackIp);
+        cmd.push(wx.url);
+        return cmd;
+    }
+
+    function probeFallbackIp() {
+        if (!fallbackIpProbe.running)
+            fallbackIpProbe.running = true;
+    }
+    Process {
+        id: fallbackIpProbe
+        running: false
+        command: ["timeout", "3", "getent", "ahostsv4", "open-meteo.com"]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: {
+                const line = String(text).trim().split("\n")[0] || "";
+                const ip = (line.split(/\s+/)[0] || "").trim();
+                if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+                    wx.fallbackKickPending = false;
+                    return;
+                }
+                if (ip !== wx.fallbackIp)
+                    console.log("[WX] direct path blocked, fallback IP " + ip);
+                wx.fallbackIp = ip;
+                if (!wx.fallbackKickPending)
+                    return;
+                wx.fallbackKickPending = false;
+                if (wx.useResolve && wx.enabled && wx.located)
+                    weatherPoller.kickAfterExit();
+            }
+        }
+    }
+
     Poller {
         id: weatherPoller
 
         active: wx.enabled && wx.located
         interval: wx.refreshMs
 
-        command: ["curl", "-fsS", "-m", "20", wx.url]
+        command: wx.fetchCommand()
         onStarted: wx._requestUrl = wx.url
 
         onActiveChanged: {
@@ -62,9 +104,90 @@ Item {
         onOutput: text => wx.absorb(text)
     }
 
+    property int retryStep: 0
+    readonly property var retryDelays: [60 * 1000, 300 * 1000]
+    function scheduleRetry() {
+        if (!wx.enabled || !wx.located)
+            return;
+        if (wx.retryStep >= wx.retryDelays.length)
+            return;
+        retryTimer.interval = wx.retryDelays[wx.retryStep++];
+        retryTimer.restart();
+    }
+    Timer {
+        id: retryTimer
+        repeat: false
+
+        onTriggered: weatherPoller.kick()
+    }
+
+    onEnabledChanged: if (!wx.enabled) {
+        retryTimer.stop();
+        wakeDelay.stop();
+        wx.retryStep = 0;
+
+        wx.wakeKilled = false;
+        wx.useResolve = false;
+        wx.fallbackIp = "";
+        wx.fallbackKickPending = false;
+    }
+    onLocatedChanged: if (!wx.located) {
+        retryTimer.stop();
+        wakeDelay.stop();
+        wx.retryStep = 0;
+        wx.wakeKilled = false;
+        wx.useResolve = false;
+        wx.fallbackIp = "";
+        wx.fallbackKickPending = false;
+    }
+
+    property double lastTickMs: 0
+
+    property bool wakeKilled: false
+    Timer {
+        interval: 5000
+        repeat: true
+        running: true
+        triggeredOnStart: true
+        onTriggered: {
+            const now = Date.now();
+            if (wx.lastTickMs === 0) {
+                wx.lastTickMs = now;
+                return;
+            }
+            const gap = now - wx.lastTickMs;
+            wx.lastTickMs = now;
+            if (gap < 15000)
+                return;
+            wx.retryStep = 0;
+            retryTimer.stop();
+            if (!wx.enabled || !wx.located)
+                return;
+            console.log("[WX] wake: gap " + Math.round(gap / 1000) + "s, refetch in 3s");
+            weatherPoller.stop();
+
+            wx._requestUrl = "";
+
+            wx.wakeKilled = true;
+            wakeDelay.restart();
+        }
+    }
+    Timer {
+        id: wakeDelay
+        interval: 3000
+        repeat: false
+
+        onTriggered: {
+            wx.wakeKilled = false;
+            if (!wx.enabled || !wx.located)
+                return;
+            weatherPoller.kickAfterExit();
+        }
+    }
+
     function absorb(text) {
         if (wx._requestUrl !== wx.url) {
-            if (wx.enabled && wx.located)
+            if (!wx.wakeKilled && wx.enabled && wx.located)
                 weatherPoller.kickAfterExit();
             return;
         }
@@ -78,9 +201,30 @@ Item {
         if (!obj || !obj.current || !obj.daily || !wx.applyPayload(obj)) {
             if (wx.ok)
                 wx.stale = true;
+
+            console.log("[WX] fetch failed (empty or invalid payload)" + (wx.retryStep < wx.retryDelays.length ? ", retry " + (wx.retryStep + 1) + "/" + wx.retryDelays.length : ", no retry left (next 30min tick)"));
+
+            const netFailed = String(text).trim() === "";
+            if (netFailed) {
+                const directFailed = !(wx.useResolve && wx.fallbackIp !== "");
+                wx.useResolve = true;
+                if (directFailed)
+                    wx.fallbackKickPending = true;
+                wx.probeFallbackIp();
+            } else if (wx.useResolve) {
+                wx.useResolve = false;
+                wx.fallbackIp = "";
+                wx.fallbackKickPending = false;
+            }
+            wx.scheduleRetry();
             return;
         }
         wx.stale = false;
+        wx.useResolve = false;
+        wx.fallbackIp = "";
+        wx.fallbackKickPending = false;
+        wx.retryStep = 0;
+        retryTimer.stop();
         wx.fetchedAt = Date.now();
         wx.cacheSave(obj);
     }
@@ -230,7 +374,9 @@ Item {
         preload: true
         printErrors: false
         watchChanges: true
-        onLoaded: wx.absorbConf(text())
+        onLoaded: {
+            wx.absorbConf(text());
+        }
 
         onFileChanged: reload()
     }

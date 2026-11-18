@@ -47,3 +47,4 @@ ClockModule 1.0 ClockModule.qml
 TrayModule 1.0 TrayModule.qml
 PrivacyModule 1.0 PrivacyModule.qml
 MprisModule 1.0 MprisModule.qml
+ThinScrollBar 1.0 ThinScrollBar.qml

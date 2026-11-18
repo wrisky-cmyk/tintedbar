@@ -33,6 +33,8 @@ Item {
                 readonly property string wpPath: WallpaperMap.pathFor(bg.screenName)
                 readonly property string wpMode: WallpaperMap.modeFor(bg.screenName)
 
+                property string lastErrNotified: ""
+
                 readonly property color wpColor: WallpaperMap.colorFor(bg.screenName) || Style.bgSolid
 
                 readonly property int decodeWidth: {
@@ -41,6 +43,11 @@ Item {
 
                     return bg.width > 0 ? bg.width : 1920;
                 }
+                readonly property int decodeHeight: {
+                    if (bg.scr && bg.scr.height > 0)
+                        return Math.round(bg.scr.height * (bg.scr.devicePixelRatio || 1));
+                    return bg.height > 0 ? bg.height : 1080;
+                }
 
                 Image {
                     id: wpImage
@@ -48,7 +55,7 @@ Item {
 
                     source: WallpaperMap.fileUrl(bg.wpPath)
 
-                    sourceSize.width: bg.decodeWidth
+                    sourceSize: Qt.size(bg.decodeWidth, bg.decodeHeight)
                     fillMode: bg.wpMode === "contain" ? Image.PreserveAspectFit : (bg.wpMode === "tile" ? Image.Tile : Image.PreserveAspectCrop)
                     asynchronous: true
                     cache: false
@@ -56,8 +63,16 @@ Item {
                     visible: status === Image.Ready
 
                     onStatusChanged: {
-                        if (status === Image.Error)
+                        if (status === Image.Error) {
                             console.log("[WALLPAPER] " + bg.screenName + " load failed: " + source);
+
+                            if (bg.wpPath !== "" && bg.wpPath !== bg.lastErrNotified) {
+                                bg.lastErrNotified = bg.wpPath;
+                                Style.notifySimple(I18n.t("wp.loadFailed"), bg.screenName + ": " + bg.wpPath);
+                            }
+                        } else if (status === Image.Ready || status === Image.Null) {
+                            bg.lastErrNotified = "";
+                        }
                     }
                 }
             }

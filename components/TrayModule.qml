@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Widgets
 
 import Quickshell.Services.SystemTray
@@ -20,7 +19,8 @@ Item {
         x: trayModule.padLeft
 
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 10
+
+        spacing: 3
 
         property string lastMenuId: ""
 
@@ -75,7 +75,8 @@ Item {
 
             delegate: Item {
                 id: trayItem
-                implicitWidth: 11
+
+                implicitWidth: 18
                 implicitHeight: 18
 
                 property int reloadTries: 0

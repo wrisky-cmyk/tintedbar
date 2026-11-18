@@ -57,11 +57,16 @@ Module {
     onRightClicked: if (popup)
         popup.open()
 
+    function pause() {
+        if (!pomodoro.running)
+            return;
+        pomodoro.remaining = Math.max(0, Math.round((pomodoro.deadline - Date.now()) / 1000));
+        pomodoro.running = false;
+        tick.stop();
+    }
     function startPause() {
         if (pomodoro.running) {
-            pomodoro.remaining = Math.max(0, Math.round((pomodoro.deadline - Date.now()) / 1000));
-            pomodoro.running = false;
-            tick.stop();
+            pomodoro.pause();
         } else if (pomodoro.active) {
             pomodoro.deadline = Date.now() + pomodoro.remaining * 1000;
             pomodoro.running = true;
@@ -92,9 +97,11 @@ Module {
         Quickshell.execDetached(["paplay", sound]);
         const key = pomodoro.inBreak ? "pomodoro.breakDone" : "pomodoro.focusDone";
         const min = pomodoro.inBreak ? (pomodoro.phase === "long" ? pomodoro.longMin : pomodoro.breakMin) : pomodoro.focusMin;
+
+        const pauseLabel = I18n.t(pomodoro.inBreak ? "pomodoro.pauseFocus" : "pomodoro.pauseBreak");
         Quickshell.execDetached(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "pomodoro", "0", "", I18n.t(key), I18n.fill(I18n.t(key + "Body"), {
                 n: min
-            }), "[]", "{}", 4000]);
+            }), "[" + Style.gvStr("pause") + ", " + Style.gvStr(pauseLabel) + "]", "{\"x-quickshell-pomodoro\": <\"pause\">}", 15000]);
         if (pomodoro.phase === "focus") {
             pomodoro.doneFocus++;
             pomodoro.beginPhase(pomodoro.doneFocus % pomodoro.longEvery === 0 ? "long" : "break");

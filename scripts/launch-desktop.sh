@@ -66,9 +66,9 @@ if [ "$empty_ws" = 1 ] && command -v jq >/dev/null 2>&1; then
             for pair in $(printf '%s' "$wss" | jq -r --arg out "$out" '
                 .[] | select(.output == $out) | select(.idx >= 1 and .idx <= 20) |
                 "\(.idx),\(.id)"' 2>/dev/null | sort -n); do
-                idx=${pair%%,*}; id=${pair##*,}
+                idx=${pair%%,*}; nid=${pair##*,}
                 [ "$idx" = "$cur" ] && continue
-                case ",$occids," in *",$id,"*) ;; *) empty=$idx; break ;; esac
+                case ",$occids," in *",$nid,"*) ;; *) empty=$idx; break ;; esac
             done
             if [ -n "$empty" ]; then
                 niri msg action focus-workspace "$empty" >/dev/null 2>&1 || true

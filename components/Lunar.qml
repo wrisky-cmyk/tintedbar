@@ -51,7 +51,7 @@ QtObject {
         const year = i;
 
         const leap = lunar.leapMonth(i);
-        let isLeap = false, j;
+        let isLeap = false, j = 1;
         for (j = 1; j < 13 && offset > 0; j++) {
             if (leap > 0 && j === leap + 1 && isLeap === false) {
                 --j;

@@ -71,9 +71,28 @@ Item {
     Process {
         id: iconProbeProc
         running: false
+        onStarted: iconProbeWatchdog.restart()
+        onExited: {
+            iconProbeWatchdog.stop();
+
+            if (root._iconProbePending.length > 0)
+                root.iconProbeBatchDone("");
+        }
         stdout: StdioCollector {
             waitForEnd: true
             onStreamFinished: root.iconProbeBatchDone(text)
+        }
+    }
+
+    Timer {
+        id: iconProbeWatchdog
+        interval: 5000
+        repeat: false
+        onTriggered: {
+            if (!iconProbeProc.running)
+                return;
+            console.warn("[ICONPROBE] batch watchdog expired, killing stuck process");
+            iconProbeProc.running = false;
         }
     }
 
@@ -107,7 +126,6 @@ Item {
         if (keys.length === 0)
             return;
         root._iconQueue = {};
-        root._iconProbePending = keys;
         root._iconProbeBatchGen = root._iconProbeGen;
         let s = root.iconProbeFunc();
         s += "probe() {\n";
@@ -116,17 +134,32 @@ Item {
         s += "  done\n";
         s += "  return 1\n";
         s += "}\n";
-        for (const k of keys) {
+        const batchKeys = [];
+
+        for (let i = 0; i < keys.length; i++) {
+            const k = keys[i];
             let names = "";
             for (const n of queue[k])
                 names += " " + Style.sq(n);
-
-            s += "p=\"$(probe" + names + ")\"\n";
-            s += "printf '%s\\037%s\\n' " + Style.sq(k) + " \"$p\"\n";
+            let line = "p=\"$(probe" + names + ")\"\n";
+            line += "printf '%s\\037%s\\n' " + Style.sq(k) + " \"$p\"\n";
+            if (batchKeys.length > 0 && s.length + line.length > 60000) {
+                for (let j = i; j < keys.length; j++)
+                    root._iconQueue[keys[j]] = queue[keys[j]];
+                break;
+            }
+            s += line;
+            batchKeys.push(k);
         }
+        if (batchKeys.length === 0) {
+            root._iconQueue = queue;
+            return;
+        }
+        root._iconProbePending = batchKeys;
         s += "printf 'DONE\\n'\n";
         iconProbeProc.command = ["sh", "-c", s];
         iconProbeProc.running = true;
+        iconProbeWatchdog.restart();
     }
 
     function iconProbeBatchDone(text) {
@@ -191,6 +224,7 @@ Item {
         } else {
             root._loginRetryWatch = [];
         }
+        iconProbeWatchdog.stop();
         root._iconProbePending = [];
         root.iconProbesFinished();
     }

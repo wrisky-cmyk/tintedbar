@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 
 set -uo pipefail
+
+if command -v flock >/dev/null 2>&1; then
+  lock_dir=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}
+  lock_file="$lock_dir/tintedbar-theme-apply.${UID:-0}.lock"
+  exec 9>"$lock_file" || { echo "theme-apply: cannot open lock $lock_file" >&2; exit 1; }
+  if ! flock -w 10 9; then
+    echo "theme-apply: another instance is still running; skipping" >&2
+    exit 0
+  fi
+fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
 
@@ -44,7 +54,7 @@ fi
 
 if [ "${1:-}" = "--mode" ]; then printf '%s\n' "$mode"; exit 0; fi
 
-"$here/icon-follow.sh" "$mode"
+"$here/icon-follow.sh" "$mode" || echo "theme-apply: icon-follow failed (GTK settings.ini unchanged)" >&2
 
 if [ "$mode" = dark ]; then v=1; else v=0; fi
 set_prefer_dark() {
@@ -101,7 +111,15 @@ acc=$(bash "$here/theme-css.sh" "$th" 2>/dev/null \
 thj=$(printf '%s' "$th" | tr -d '"\\')
 if mkdir -p "$st" && tmp=$(mktemp "$st/theme-palette.XXXXXX"); then
 
-  if printf '{"family":"%s","accent":"%s"}\n' "$thj" "$acc" >"$tmp"; then
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg family "$thj" --arg accent "$acc" \
+      '{family:$family,accent:$accent}' >"$tmp"
+  else
+
+    accj=$(printf '%s' "$acc" | tr -d '"\\')
+    printf '{"family":"%s","accent":"%s"}\n' "$thj" "$accj" >"$tmp"
+  fi
+  if [ -s "$tmp" ]; then
     mv -f "$tmp" "$st/theme-palette.json" || rm -f "$tmp"
   else
     rm -f "$tmp"

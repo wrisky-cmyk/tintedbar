@@ -72,7 +72,7 @@ OverlayPanel {
         const n = launcher.apps.length;
         if (n === 0)
             return;
-        const i = Math.max(0, Math.min(n - 1, list.currentIndex + d));
+        const i = Math.max(0, Math.min(n - 1, Math.max(0, list.currentIndex) + d));
         if (i === list.currentIndex)
             return;
         list.currentIndex = i;
@@ -80,7 +80,14 @@ OverlayPanel {
     }
 
     readonly property var calc: {
-        const q = query.trim();
+        let q = query.trim();
+        if (q === "")
+            return null;
+        q = q.replace(/[×✕]/g, "*").replace(/÷/g, "/").replace(/[−–—]/g, "-").replace(/\^/g, "**").replace(/\s*=\s*$/, "").trim();
+
+        if (/\d{1,3}(,\d{3})+/.test(q))
+            q = q.replace(/,/g, "");
+        q = q.trim();
         if (q === "" || !/\d/.test(q) || !/[+\-*/%]/.test(q) || !/^[0-9+\-*/().%\s]+$/.test(q))
             return null;
         try {
@@ -175,6 +182,22 @@ OverlayPanel {
         Keys.onUpPressed: launcher.moveSel(-1)
         Keys.onDownPressed: launcher.moveSel(1)
 
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_PageUp) {
+                launcher.moveSel(-10);
+                event.accepted = true;
+            } else if (event.key === Qt.Key_PageDown) {
+                launcher.moveSel(10);
+                event.accepted = true;
+            } else if (event.key === Qt.Key_Home) {
+                launcher.moveSel(-9999);
+                event.accepted = true;
+            } else if (event.key === Qt.Key_End) {
+                launcher.moveSel(9999);
+                event.accepted = true;
+            }
+        }
+
         Keys.onEnterPressed: launcher.cardSubmit()
         Keys.onReturnPressed: launcher.cardSubmit()
 
@@ -217,6 +240,22 @@ OverlayPanel {
 
                     Keys.onUpPressed: launcher.moveSel(-1)
                     Keys.onDownPressed: launcher.moveSel(1)
+
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Home) {
+                            launcher.moveSel(-9999);
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_End) {
+                            launcher.moveSel(9999);
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_PageUp) {
+                            launcher.moveSel(-10);
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_PageDown) {
+                            launcher.moveSel(10);
+                            event.accepted = true;
+                        }
+                    }
                     onAccepted: launcher.calc !== null ? launcher.copyCalc() : launcher.launchSel()
                 }
             }
@@ -328,6 +367,7 @@ OverlayPanel {
                             anchors.rightMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
                             text: row.modelData.name
+                            textFormat: Text.PlainText
                             color: Style.text1
                             font.family: Style.cjk
                             font.pixelSize: 14
@@ -347,9 +387,18 @@ OverlayPanel {
                     }
                 }
 
+                ThinScrollBar {
+                    target: list
+                    anchors.top: list.top
+                    anchors.bottom: list.bottom
+                    anchors.right: list.right
+                    anchors.rightMargin: -10
+                }
+
                 Text {
                     anchors.centerIn: parent
-                    visible: launcher.apps.length === 0
+
+                    visible: launcher.apps.length === 0 && launcher.calc === null
                     text: launcher.appRecords.length === 0 ? I18n.t("launcher.empty") : I18n.t("launcher.noMatch")
                     color: Style.text3
                     font.family: Style.cjk

@@ -38,26 +38,40 @@ Module {
             u = "B";
         }
         n = Math.min(999, Math.round(n));
-        return ("00" + n).slice(-3) + u;
+        return String(n) + u;
     }
 
     function isVirtualIface(name) {
         return /^(veth|docker|virbr|vnet|podman|cni|cali|flannel|vxlan|br[-0-9])/.test(String(name));
     }
 
+    function isTunnelIface(name) {
+        return /^(tun|tap|wg|tailscale|zt|ppp|ipsec|nordlynx)/.test(String(name));
+    }
+
     function refreshSpeed(text) {
-        let rx = 0, tx = 0, seen = 0;
+        const rows = [];
         for (const l of String(text).split("\n").slice(2)) {
             const f = l.trim().split(/[:\s]+/);
             if (f.length < 10 || f[0] === "" || f[0] === "lo" || netSpeedModule.isVirtualIface(f[0]))
                 continue;
-            rx += +f[1] || 0;
-            tx += +f[9] || 0;
-            seen++;
+            rows.push({
+                name: f[0],
+                rx: +f[1] || 0,
+                tx: +f[9] || 0
+            });
         }
 
-        if (seen === 0)
+        if (rows.length === 0)
             return;
+        const hasPhysical = rows.some(r => !netSpeedModule.isTunnelIface(r.name));
+        let rx = 0, tx = 0;
+        for (const r of rows) {
+            if (hasPhysical && netSpeedModule.isTunnelIface(r.name))
+                continue;
+            rx += r.rx;
+            tx += r.tx;
+        }
         const now = Date.now();
         if (lastBytes) {
             const dt = (now - lastBytes.t) / 1000;
@@ -103,19 +117,35 @@ Module {
         text: "↓000B ↑000B"
     }
 
-    Text {
-        id: netSpeedText
-        anchors.centerIn: parent
-        anchors.verticalCenterOffset: 1
+    TextMetrics {
+        id: netSpeedTxMetrics
+        font.family: Style.nerd
+        font.pixelSize: 14
+        text: "↑000B"
+    }
 
-        width: netSpeedMetrics.advanceWidth
-        horizontalAlignment: Text.AlignRight
+    Text {
+        id: netSpeedRxText
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: 1
         color: Style.text2
         font.family: Style.nerd
         font.pixelSize: 14
-        text: "↓" + netSpeedModule.fmtSpeed(netSpeedModule.rxSpeed) + " ↑" + netSpeedModule.fmtSpeed(netSpeedModule.txSpeed)
+        text: "↓" + netSpeedModule.fmtSpeed(netSpeedModule.rxSpeed)
     }
 
-    onClicked: Quickshell.execDetached(["nm-applet"])
+    Text {
+        anchors.left: parent.left
+        anchors.leftMargin: netSpeedMetrics.advanceWidth - netSpeedTxMetrics.advanceWidth
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: 1
+        color: Style.text2
+        font.family: Style.nerd
+        font.pixelSize: 14
+        text: "↑" + netSpeedModule.fmtSpeed(netSpeedModule.txSpeed)
+    }
+
+    onClicked: Style.probePanelApp(["nm-applet"])
     onRightClicked: qsRoot.netToggle("right-click")
 }

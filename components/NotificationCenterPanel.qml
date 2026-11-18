@@ -30,7 +30,15 @@ Item {
                 break;
             h = next;
         }
-        return h > 0 ? h : cap;
+
+        if (h > 0)
+            return h;
+
+        for (const k of kids) {
+            if (k && k.visible !== false && k.height > 0)
+                return k.height;
+        }
+        return cap;
     }
 
     readonly property bool listOverflows: entries.implicitHeight > panel.listHeight + 1
@@ -125,6 +133,20 @@ Item {
             return;
         panel.selIndex = i;
         panel.scrollToSel();
+    }
+
+    function moveSelPage(d) {
+        const n = panel.entryCount;
+        if (n === 0)
+            return;
+        const per = Math.max(1, Math.round(list.height / Math.max(1, list.contentHeight / Math.max(1, n))));
+        moveSel(d * per);
+    }
+    function moveSelEnd(end) {
+        const n = panel.entryCount;
+        if (n === 0)
+            return;
+        moveSel(end ? n : -n);
     }
 
     function scrollToSel() {
@@ -556,16 +578,11 @@ Item {
             }
         }
 
-        Rectangle {
-            visible: list.visible && panel.listOverflows
+        ThinScrollBar {
+            target: list
             x: layout.x + list.x + list.width - 4
-            width: 3
-            radius: 1.5
-            color: Style.text3
-            opacity: 0.45
-
-            height: entries.implicitHeight > 0 ? Math.max(24, list.height * list.height / entries.implicitHeight) : 24
-            y: layout.y + list.y + (list.height - height) * list.contentY / Math.max(1, entries.implicitHeight - list.height)
+            y: layout.y + list.y
+            height: list.height
         }
     }
 }

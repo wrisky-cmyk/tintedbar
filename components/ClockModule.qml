@@ -100,6 +100,7 @@ Module {
         interval: 1000
         running: qsRoot.showClockSeconds
         repeat: true
+        triggeredOnStart: true
         onTriggered: clockModule.clockTick++
     }
     Timer {

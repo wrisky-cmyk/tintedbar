@@ -43,13 +43,12 @@ There is no persistent Python/Node process, and it uses the network only for wea
 
 | Dependency | Effect |
 | --- | --- |
-| `cliphist` + wl-clipboard | Clipboard panel. **Add the writer to your compositor autostart**: `wl-paste --watch cliphist store` |
+| `cliphist` + wl-clipboard | Clipboard panel. **Add the writer to your compositor autostart**: `wl-paste --watch cliphist store` (the panel's empty state points this out directly when cliphist or the writer is missing) |
 | `curl` | Weather (requests Open-Meteo every 30 minutes only while enabled) |
 | `ddcutil` | External monitor brightness (DDC/CI; user must be in the `i2c` group). Built-in screen backlight goes through logind and needs no package |
 | `gsettings` / `gio` (or `xdg-open`) | Follow system light/dark mode / open apps from the launcher |
-| `notify-send` (libnotify) | Notification action for the reboot prompt; the icon remains clickable but shows no details without it |
 | `systemctl` / `loginctl` | Power-menu shutdown / reboot / suspend / logout |
-| `nm-applet` / `blueman-manager` / `pavucontrol` | Panels opened by the network / Bluetooth / volume icons |
+| `nm-applet` / `blueman-manager` / `pavucontrol` | Panels opened by the network / Bluetooth / volume icons; a missing one produces a system notification on click (no more silent no-op) |
 | `$TERMINAL` (fallback `alacritty`, may include arguments like `"myterm --hold"`) | Terminal button and `top` from temperature / disk / CPU / memory |
 
 **No need to install**: playerctl / pactl / wpctl / brightnessctl / grim / jq / python / Node.

@@ -40,13 +40,12 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 
 | 依赖 | 影响 |
 | --- | --- |
-| `cliphist` + wl-clipboard | 剪贴板面板。**写入端需自行加入合成器 autostart**：`wl-paste --watch cliphist store` |
+| `cliphist` + wl-clipboard | 剪贴板面板。**写入端需自行加入合成器 autostart**：`wl-paste --watch cliphist store`（未装或写入端未跑时，面板空态会直接提示） |
 | `curl` | 天气（仅在开关打开时每 30 分钟请求一次 Open-Meteo） |
 | `ddcutil` | 外接屏亮度（DDC/CI，用户需在 i2c 组）；内置屏背光走 logind，不需要任何包 |
 | `gsettings` / `gio`（或 `xdg-open`） | 跟随系统深浅色 / 启动器打开应用 |
-| `notify-send`（libnotify） | 重启提示的通知动作；缺失时图标仍可点，但不会弹出详情 |
 | `systemctl` / `loginctl` | 电源菜单的关机/重启/休眠/注销 |
-| `nm-applet` / `blueman-manager` / `pavucontrol` | 点网络 / 蓝牙 / 音量图标拉起的面板 |
+| `nm-applet` / `blueman-manager` / `pavucontrol` | 点网络 / 蓝牙 / 音量图标拉起的面板；缺失时点击会弹出系统提示（不再无反应） |
 | `$TERMINAL`（兜底 `alacritty`，可带参数如 `"myterm --hold"`） | 左栏终端按钮、点击温度/磁盘/CPU/内存时打开的 `top` |
 
 **无需安装**：playerctl / pactl / wpctl / brightnessctl / grim / jq / python / Node。
@@ -104,7 +103,7 @@ qs ipc call brightness set <0-100>    # 亮度（也支持 step <±N>）
 | 时钟 / 铃铛 | 日历 / 通知历史 | 切换日历视图 / 勿扰开关 |
 | 网络 | 打开 nm-applet | 无线格开关射频；有线格断开或接回网线；网速数字断开当前链路 |
 | 蓝牙 | 打开 blueman-manager | 切换蓝牙电源 |
-| 音量 | 打开 pavucontrol | 切换默认输出静音 |
+| 音量 | 打开 pavucontrol（滚轮 ±5%） | 切换默认输出静音 |
 | 正在播放（需开启） | 播放 / 暂停（滚轮 = 下一首 / 上一首） | 下一首 |
 | 麦克风（占用时显示） | 弹出输入音量滑条 | 切换麦克风静音（图标变带斜杠并压暗） |
 | 亮度 | 弹出亮度滑条 | — |

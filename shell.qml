@@ -5,13 +5,9 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
-import Quickshell.Services.Mpris
-import Quickshell.Services.SystemTray
-import Quickshell.Services.Notifications
 import Quickshell.Services.Polkit
 import Quickshell.Wayland
 import Quickshell.Wayland._IdleInhibitor
-import Quickshell.Widgets
 import "components"
 
 ShellRoot {
@@ -78,6 +74,8 @@ ShellRoot {
     property var settingsByScreen: ({})
 
     property var brightnessByScreen: ({})
+
+    property var pomodoroByScreen: ({})
 
     property var calendarByScreen: ({})
     property var weatherPopupByScreen: ({})
@@ -287,10 +285,14 @@ ShellRoot {
 
     readonly property var showFlags: barFlagList.map(f => f.key)
 
-    readonly property string home: Quickshell.env("HOME") || ""
+    readonly property string home: Quickshell.env("HOME") || Quickshell.env("TMPDIR") || "/tmp"
     readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (qsRoot.home + "/.local/state")) + "/quickshell"
 
     function saveBarSettings() {
+        if (!qsRoot.barSettingsLoaded) {
+            qsRoot.barSettingsPending = true;
+            return;
+        }
         barSettingsSaveDebounce.restart();
     }
 
@@ -338,7 +340,7 @@ ShellRoot {
     }
 
     function setHistoryLimit(v) {
-        v = Math.max(5, Math.min(50, Math.round(v / 5) * 5));
+        v = Math.max(5, Math.min(500, Math.round(v / 5) * 5));
         if (v === notifCenter.historyLimit)
             return;
         notifCenter.historyLimit = v;
@@ -446,6 +448,10 @@ ShellRoot {
     Process {
         id: barSettingsSave
         running: false
+        onExited: exitCode => {
+            if (exitCode !== 0)
+                console.warn("[QS] bar-settings save failed, exitCode " + exitCode);
+        }
     }
 
     Process {
@@ -510,7 +516,7 @@ ShellRoot {
                     Style.barHeight = Math.max(24, Math.min(48, bh));
                 const hl = num(saved.historyLimit);
                 if (hl !== null)
-                    notifCenter.historyLimit = Math.max(5, Math.min(50, hl));
+                    notifCenter.historyLimit = Math.max(5, Math.min(500, Math.round(hl / 5) * 5));
                 const cm = num(saved.clipMaxEntries);
                 if (cm !== null)
                     qsRoot.clipMaxEntries = Math.max(10, Math.min(200, cm));
@@ -547,6 +553,10 @@ ShellRoot {
                     Style.paletteName = saved.paletteName;
 
                 qsRoot.barSettingsLoaded = true;
+                if (qsRoot.barSettingsPending) {
+                    qsRoot.barSettingsPending = false;
+                    qsRoot.saveBarSettings();
+                }
                 qsRoot.settleHistoryLimit();
             }
         }
@@ -561,6 +571,7 @@ ShellRoot {
     }
 
     property bool barSettingsLoaded: false
+    property bool barSettingsPending: false
     function settleHistoryLimit() {
         if (qsRoot.barSettingsLoaded && notifCenter.historyLoaded) {
             notifCenter.historySettled = true;
@@ -640,6 +651,16 @@ ShellRoot {
             if (l) {
                 l.close();
             }
+        }
+
+        function probe(): void {
+            const l = qsRoot.panelForFocused(qsRoot.powerMenuByScreen);
+            if (l)
+                l.probeBlockers();
+        }
+        function blockers(): string {
+            const l = qsRoot.panelForFocused(qsRoot.powerMenuByScreen);
+            return l ? l.blockersDump() : "[]";
         }
     }
 
@@ -857,6 +878,24 @@ ShellRoot {
             muted: audio.muted
         });
     }
+
+    function audioStep(step, how) {
+        const sink = Pipewire.defaultAudioSink;
+        const audio = (sink && sink.audio) ? sink.audio : null;
+        if (!audio) {
+            console.log("[VOL] " + how + " step: no default output yet, no-op");
+            return;
+        }
+        const cur = Number(audio.volume) || 0;
+        const v = Math.min(1, Math.max(0, cur + step / 100));
+
+        if (step > 0 && audio.muted)
+            audio.muted = false;
+        if (v === cur)
+            return;
+        audio.volume = v;
+        console.log("[VOL] " + how + " " + (step > 0 ? "+" : "") + step + "% → " + Math.round(v * 100) + "%");
+    }
     IpcHandler {
         target: "audio"
 
@@ -1040,9 +1079,73 @@ ShellRoot {
         console.log("[REBOOT] " + how + " notify: kernel " + rebootNeeded.newerKernel.length + " / modules " + rebootNeeded.newerModules.length + " / userland libs " + rebootNeeded.staleLibs.length);
 
         const action = qsRoot.rebootAction(rebootNeeded.newerKernel.length, rebootNeeded.newerModules.length);
-        const shellCmd = "k=$(notify-send -a quickshell -u normal -i " + action.icon + " -h string:x-quickshell-reboot:1" + " -A " + action.id + "=\"$QS_RB_ACTION\" \"$QS_RB_TITLE\" \"$QS_RB_BODY\"); " + "[ \"$k\" = " + action.id + " ] && " + action.command + "; true";
-        Quickshell.execDetached(["env", "QS_RB_TITLE=" + notice.title, "QS_RB_BODY=" + notice.body, "QS_RB_ACTION=" + action.label, "sh", "-c", shellCmd]);
+
+        if (rebootNotifyProc.running)
+            return;
+        rebootNotifyProc.command = ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", action.icon, notice.title, notice.body, "[" + Style.gvStr(action.id) + ", " + Style.gvStr(action.label) + "]", "{\"x-quickshell-reboot\": <\"1\">}", "5000"];
+        rebootNotifyProc.running = true;
     }
+
+    Process {
+        id: rebootNotifyProc
+        stderr: StdioCollector {
+            onStreamFinished: {
+                if (text.trim() !== "")
+                    console.log("[REBOOT] notify stderr: " + text.trim());
+            }
+        }
+        onExited: code => {
+            if (code !== 0)
+                console.log("[REBOOT] notify failed, gdbus exit " + code);
+        }
+    }
+
+    function rebootActionRoute(identifier) {
+        if (identifier === "reboot") {
+            const inst = Object.values(qsRoot.powerMenuByScreen)[0];
+            if (inst) {
+                inst.run("systemctl reboot");
+                return true;
+            }
+
+            Quickshell.execDetached(["systemctl", "reboot"]);
+            return true;
+        }
+        if (identifier === "relogin") {
+            Quickshell.execDetached(["bash", "-c", "loginctl terminate-user \"$USER\""]);
+            return true;
+        }
+        return false;
+    }
+
+    function forceActionRoute(identifier) {
+        const op = identifier === "reboot-force" ? "reboot" : identifier === "poweroff-force" ? "poweroff" : "";
+        if (op === "")
+            return false;
+        const inst = Object.values(qsRoot.powerMenuByScreen)[0];
+        if (inst) {
+            inst.requestGracefulForce(op);
+            return true;
+        }
+
+        Quickshell.execDetached(["bash", "-c", op === "reboot" ? "systemctl reboot" : "systemctl poweroff"]);
+        return true;
+    }
+
+    function pomodoroActionRoute(identifier) {
+        if (identifier !== "pause")
+            return false;
+        const mods = qsRoot.pomodoroByScreen;
+        for (const k of Object.keys(mods))
+            if (mods[k] && mods[k].running)
+                mods[k].pause();
+        return true;
+    }
+
+    function notificationActionRoute(identifier) {
+        return qsRoot.rebootActionRoute(identifier) || qsRoot.forceActionRoute(identifier) || qsRoot.pomodoroActionRoute(identifier);
+    }
+
     IpcHandler {
         target: "reboot"
 
@@ -1182,6 +1285,7 @@ ShellRoot {
                 qsRoot.clipsByScreen[screenRoot.screenKey] = clipPicker;
                 qsRoot.powerMenuByScreen[screenRoot.screenKey] = powerMenu;
                 qsRoot.brightnessByScreen[screenRoot.screenKey] = brightnessModule;
+                qsRoot.pomodoroByScreen[screenRoot.screenKey] = pomodoroModuleRef;
                 qsRoot.promptByScreen[screenRoot.screenKey] = polkitPrompt;
                 qsRoot.settingsByScreen[screenRoot.screenKey] = settingsPanel;
                 qsRoot.calendarByScreen[screenRoot.screenKey] = calendarPopup;
@@ -1198,6 +1302,7 @@ ShellRoot {
                 delete qsRoot.weatherPopupByScreen[screenRoot.screenKey];
                 delete qsRoot.trayRowByScreen[screenRoot.screenKey];
                 delete qsRoot.brightnessByScreen[screenRoot.screenKey];
+                delete qsRoot.pomodoroByScreen[screenRoot.screenKey];
             }
 
             PanelWindow {
@@ -1283,7 +1388,6 @@ ShellRoot {
                             property bool dragActive: false
                             property var dragToplevel: null
 
-                            property string dragAddress: ""
                             property int dragFromWs: 0
                             property real ghostX: 0
                             function dragKeyOf(t) {
@@ -1316,7 +1420,6 @@ ShellRoot {
 
                             function beginDrag(toplevel, fromWs, gx) {
                                 dragToplevel = toplevel;
-                                dragAddress = dragKeyOf(toplevel);
                                 dragFromWs = fromWs;
                                 ghostX = gx;
                                 dragActive = true;
@@ -1404,7 +1507,7 @@ ShellRoot {
                         onClicked: {
                             if (qsRoot.launcherEmptyWs)
                                 Compositor.prepareEmptyWorkspaceForLaunch();
-                            Quickshell.execDetached([Style.terminal]);
+                            Style.probePanelApp([Style.terminal]);
                         }
                     }
 
@@ -1419,7 +1522,8 @@ ShellRoot {
                         onClicked: {
                             if (qsRoot.launcherEmptyWs)
                                 Compositor.prepareEmptyWorkspaceForLaunch();
-                            Quickshell.execDetached(["bash", "-c", "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then exec " + Style.sq(Style.configDir + "/scripts/launch-desktop.sh") + " \"$id\"; else exec xdg-open about:blank; fi"]);
+
+                            Quickshell.execDetached(["env", "QS_NOBROWSER=" + I18n.t("hint.noBrowser"), "QS_LAUNCHER=" + Style.configDir + "/scripts/launch-desktop.sh", "bash", "-c", "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then \"$QS_LAUNCHER\" \"$id\" && exit 0; fi; " + "xdg-open about:blank 2>/dev/null && exit 0; " + "exec gdbus call --session --dest org.freedesktop.Notifications " + "--object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOBROWSER\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
                         }
                     }
 
@@ -1436,7 +1540,7 @@ ShellRoot {
                         onClicked: {
                             if (qsRoot.launcherEmptyWs)
                                 Compositor.prepareEmptyWorkspaceForLaunch();
-                            Quickshell.execDetached(["xdg-open", Quickshell.env("HOME")]);
+                            Quickshell.execDetached(["env", "QS_NOFM=" + I18n.t("hint.noFileManager"), "bash", "-c", "xdg-open \"$HOME\" 2>/dev/null || exec gdbus call --session " + "--dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOFM\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
                         }
                     }
                 }
@@ -1472,6 +1576,7 @@ ShellRoot {
                         }
 
                         text: titleText.shownTitle
+                        textFormat: Text.PlainText
                         color: Style.text1
                         font.family: Style.cjk
                         font.pixelSize: 16
@@ -1571,7 +1676,7 @@ ShellRoot {
                             }
                         }
 
-                        onClicked: Quickshell.execDetached([Style.terminal, "-e", "top"])
+                        onClicked: Style.probePanelApp([Style.terminal, "-e", "top"])
                     }
 
                     BarButton {
@@ -1616,7 +1721,7 @@ ShellRoot {
                             }
                         }
 
-                        onClicked: Quickshell.execDetached([Style.terminal, "-e", "top"])
+                        onClicked: Style.probePanelApp([Style.terminal, "-e", "top"])
                     }
 
                     BarButton {
@@ -1656,7 +1761,7 @@ ShellRoot {
                             }
                         }
 
-                        onClicked: Quickshell.execDetached([Style.terminal, "-e", "top"])
+                        onClicked: Style.probePanelApp([Style.terminal, "-e", "top"])
                     }
 
                     BarButton {
@@ -1761,6 +1866,7 @@ ShellRoot {
                             x: btText.x + btText.implicitWidth + 4
                             anchors.verticalCenter: parent.verticalCenter
                             text: btModule.btConn ? btModule.btConn.name : ""
+                            textFormat: Text.PlainText
                             color: Style.text2
                             font.family: Style.cjk
 
@@ -1769,7 +1875,7 @@ ShellRoot {
                             width: Math.min(implicitWidth, 140)
                         }
 
-                        onClicked: Quickshell.execDetached(["blueman-manager"])
+                        onClicked: Style.probePanelApp(["blueman-manager"])
 
                         onRightClicked: qsRoot.btToggle("right-click")
                     }
@@ -1831,6 +1937,7 @@ ShellRoot {
                     BarButton {
 
                         glyph: Style.systemDark ? "\u{F0594}" : "\u{F522}"
+
                         glyphSize: 17
                         padH: 2
                         marginRight: 2
@@ -1881,6 +1988,9 @@ ShellRoot {
                         contentYOffset: 1
                         contentWidth: volIcon.implicitWidth
 
+                        wheelEnabled: true
+                        onWheelNotch: d => qsRoot.audioStep(d * 5, "wheel")
+
                         readonly property var sink: Pipewire.defaultAudioSink
                         readonly property var audio: (volModule.sink && volModule.sink.audio) ? volModule.sink.audio : null
 
@@ -1914,7 +2024,7 @@ ShellRoot {
                             }
                         }
 
-                        onClicked: Quickshell.execDetached(["pavucontrol"])
+                        onClicked: Style.probePanelApp(["pavucontrol"])
 
                         onRightClicked: qsRoot.audioToggleMute("right-click")
                     }
@@ -2080,7 +2190,7 @@ ShellRoot {
                 focusable: panelHere
                 color: "transparent"
 
-                visible: (panelHere || notifCenter.openCount > 0) && (!notifCenter.popupSuppressed || notifCenter.criticalTracked)
+                visible: (panelHere || notifCenter.openCount > 0) && (!notifCenter.popupSuppressed || notifCenter.criticalTracked || panelHere)
 
                 WlrLayershell.layer: WlrLayer.Overlay
                 implicitWidth: panelHere ? (Screen.width > 0 ? Screen.width : 1280) : 300
@@ -2090,7 +2200,6 @@ ShellRoot {
                     id: content
                     width: parent.width
                     height: parent.height
-                    implicitWidth: notifPopupWindow.implicitWidth
                     implicitHeight: notifPopupWindow.panelHere ? notifPopupWindow.implicitHeight : popupColumn.implicitHeight
 
                     SafeMouseArea {
@@ -2112,6 +2221,8 @@ ShellRoot {
                                 notification: modelData
                                 center: notifCenter
 
+                                actionRouter: qsRoot.notificationActionRoute
+
                                 visible: (notifCenter.popupSuppressed && notifCenter.criticalTracked) ? (!!modelData && modelData.urgency === 2) : index >= notifCenter.openCount - notifCenter.maxVisible
                             }
                         }
@@ -2131,6 +2242,22 @@ ShellRoot {
 
                         Keys.onUpPressed: historyPanel.moveSel(-1)
                         Keys.onDownPressed: historyPanel.moveSel(1)
+
+                        Keys.onPressed: event => {
+                            if (event.key === Qt.Key_PageUp) {
+                                historyPanel.moveSelPage(-1);
+                                event.accepted = true;
+                            } else if (event.key === Qt.Key_PageDown) {
+                                historyPanel.moveSelPage(1);
+                                event.accepted = true;
+                            } else if (event.key === Qt.Key_Home) {
+                                historyPanel.moveSelEnd(false);
+                                event.accepted = true;
+                            } else if (event.key === Qt.Key_End) {
+                                historyPanel.moveSelEnd(true);
+                                event.accepted = true;
+                            }
+                        }
 
                         Keys.onReturnPressed: historyPanel.activateSel()
                         Keys.onEnterPressed: historyPanel.activateSel()

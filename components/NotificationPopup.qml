@@ -9,6 +9,8 @@ Item {
 
     property var center: null
 
+    property var actionRouter: null
+
     property bool noteClosed: false
 
     property int cardWidth: 300
@@ -19,6 +21,8 @@ Item {
     readonly property int urgency: card.note ? card.note.urgency : NotificationUrgency.Normal
 
     readonly property bool detailNotice: !!card.note && !!card.note.hints && String(card.note.hints["x-quickshell-reboot"] || "") !== ""
+
+    readonly property bool routedNotice: !!card.note && !!card.note.hints && (String(card.note.hints["x-quickshell-reboot"] || "") !== "" || String(card.note.hints["x-quickshell-power"] || "") !== "" || String(card.note.hints["x-quickshell-pomodoro"] || "") !== "")
 
     readonly property int timeoutMs: {
         if (!card.note)
@@ -199,6 +203,12 @@ Item {
                                 const a = pill.modelData;
                                 if (!a || card.noteClosed)
                                     return;
+
+                                if (card.routedNotice && card.actionRouter && card.actionRouter(a.identifier)) {
+                                    if (card.note)
+                                        card.note.dismiss();
+                                    return;
+                                }
                                 a.invoke();
                             }
                         }

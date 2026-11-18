@@ -24,7 +24,9 @@ Item {
                 return null;
             }
             if (name.indexOf("://") >= 0) {
-                fileIcon.source = name;
+                if (/^(file|image|resource|qrc):/i.test(name)) {
+                    fileIcon.source = name;
+                }
                 return null;
             }
 

@@ -27,7 +27,7 @@ Module {
         text: "\u{F092E}"
     }
 
-    onClicked: Quickshell.execDetached(["nm-applet"])
+    onClicked: Style.probePanelApp(["nm-applet"])
 
     onRightClicked: qsRoot.netToggle("right-click")
 }

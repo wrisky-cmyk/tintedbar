@@ -57,7 +57,8 @@ OverlayPanel {
             width: 14
             height: 14
             radius: 7
-            color: Style.text1
+
+            color: sw.checked ? Style.text1 : Style.text2
             Behavior on x {
                 NumberAnimation {
                     duration: 120
@@ -386,7 +387,7 @@ OverlayPanel {
                         apply: v => qsRoot.setHistoryLimit(v)
                         step: 5
                         minValue: 5
-                        maxValue: 50
+                        maxValue: 500
                     }
                 }
 

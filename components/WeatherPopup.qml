@@ -29,6 +29,30 @@ PopupWindow {
         }
     }
 
+    readonly property string updatedText: {
+        const ms = Number(weather.fetchedAt) || 0;
+        if (ms <= 0)
+            return "";
+        const d = new Date(ms);
+        const now = new Date();
+        const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+        let stamp;
+        if (sameDay(d, now))
+            stamp = Qt.formatTime(d, "HH:mm");
+        else if (sameDay(d, yest))
+            stamp = I18n.fill(I18n.t("wx.yesterdayAt"), {
+                t: Qt.formatTime(d, "HH:mm")
+            });
+        else
+            stamp = Qt.formatDateTime(d, "MM-dd HH:mm");
+        if (weather.stale)
+            stamp += " · " + I18n.t("wx.stale");
+        return I18n.fill(I18n.t("wx.updated"), {
+            t: stamp
+        });
+    }
+
     color: "transparent"
 
     implicitWidth: 244
@@ -178,16 +202,20 @@ PopupWindow {
 
                 Text {
                     anchors.left: parent.left
+                    anchors.right: refreshLabel.left
+                    anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    color: Style.text3
+
+                    color: weather.stale ? Style.danger : Style.text3
                     font.family: Style.cjk
                     font.pixelSize: 11
-                    text: weather.fetchedAt > 0 ? I18n.fill(I18n.t("wx.updated"), {
-                        t: Qt.formatTime(new Date(weather.fetchedAt), "hh:mm")
-                    }) : ""
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    text: weatherPopup.updatedText
                 }
 
                 Text {
+                    id: refreshLabel
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -199,7 +227,11 @@ PopupWindow {
 
                 MouseArea {
                     id: refreshMouse
-                    anchors.fill: parent
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    width: refreshLabel.width
+                    height: parent.height
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: weather.refresh()

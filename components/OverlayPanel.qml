@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Wayland
 
 PanelWindow {
     id: overlay
@@ -9,6 +10,8 @@ PanelWindow {
     visible: false
     color: "transparent"
     exclusiveZone: -1
+
+    WlrLayershell.layer: WlrLayer.Overlay
     focusable: visible
     screen: overlay.bar ? overlay.bar.screen : null
 
