@@ -1,4 +1,5 @@
 singleton Style 1.0 Style.qml
+JsonStore 1.0 JsonStore.qml
 singleton Compositor 1.0 Compositor.qml
 singleton UsageStore 1.0 UsageStore.qml
 singleton I18n 1.0 I18n.qml
@@ -6,6 +7,8 @@ singleton Lunar 1.0 Lunar.qml
 singleton Almanac 1.0 Almanac.qml
 singleton WallpaperMap 1.0 WallpaperMap.qml
 singleton IconProbe 1.0 IconProbe.qml
+singleton BtState 1.0 BtState.qml
+singleton NetState 1.0 NetState.qml
 CapsPoller 1.0 CapsPoller.qml
 Wallpaper 1.0 Wallpaper.qml
 BarButton 1.0 BarButton.qml
@@ -14,14 +17,17 @@ Module 1.0 Module.qml
 PomodoroModule 1.0 PomodoroModule.qml
 PomodoroPopup 1.0 PomodoroPopup.qml
 OverlayPanel 1.0 OverlayPanel.qml
+PopupPanel 1.0 PopupPanel.qml
 Poller 1.0 Poller.qml
 SafeMouseArea 1.0 SafeMouseArea.qml
+ScreenPanels 1.0 ScreenPanels.qml
 StepCtl 1.0 StepCtl.qml
 StepperRow 1.0 StepperRow.qml
 NotificationCenter 1.0 NotificationCenter.qml
 Weather 1.0 Weather.qml
 RebootNeeded 1.0 RebootNeeded.qml
 NotificationCenterPanel 1.0 NotificationCenterPanel.qml
+NotificationIcon 1.0 NotificationIcon.qml
 NotifyButton 1.0 NotifyButton.qml
 NotificationPopup 1.0 NotificationPopup.qml
 VolumeSlider 1.0 VolumeSlider.qml
@@ -35,6 +41,7 @@ SettingsPanel 1.0 SettingsPanel.qml
 PolkitPrompt 1.0 PolkitPrompt.qml
 CalendarPopup 1.0 CalendarPopup.qml
 WeatherPopup 1.0 WeatherPopup.qml
+WallpaperPopup 1.0 WallpaperPopup.qml
 BrightnessPopup 1.0 BrightnessPopup.qml
 KeyboardModule 1.0 KeyboardModule.qml
 BatteryModule 1.0 BatteryModule.qml
@@ -48,3 +55,7 @@ TrayModule 1.0 TrayModule.qml
 PrivacyModule 1.0 PrivacyModule.qml
 MprisModule 1.0 MprisModule.qml
 ThinScrollBar 1.0 ThinScrollBar.qml
+ThemeAuto 1.0 ThemeAuto.qml
+IpcPanels 1.0 IpcPanels.qml
+IpcSystem 1.0 IpcSystem.qml
+IpcDiag 1.0 IpcDiag.qml

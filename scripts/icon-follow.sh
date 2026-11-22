@@ -57,8 +57,9 @@ set_icon_theme() {
       mkdir -p "${ini%/*}" || return 1
       printf '[Settings]\ngtk-icon-theme-name=%s\n' "$target" > "$ini" || return 1
     fi
-  elif grep -q '^gtk-icon-theme-name=' "$ini"; then
-    sed -i "s|^gtk-icon-theme-name=.*|gtk-icon-theme-name=$esc|" "$ini" || return 1
+  elif grep -q '^[[:space:]]*gtk-icon-theme-name=' "$ini"; then
+
+    sed -i "s|^[[:space:]]*gtk-icon-theme-name=.*|gtk-icon-theme-name=$esc|" "$ini" || return 1
   elif grep -q '^\[Settings\]' "$ini"; then
     sed -i "/^\[Settings\]/a gtk-icon-theme-name=$esc" "$ini" || return 1
   else

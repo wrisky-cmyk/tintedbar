@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -186,13 +187,15 @@ Item {
     Process {
         id: dpmsProbe
         running: false
-        command: ["sh", "-c", "hyprctl -j monitors"]
+
+        command: ["sh", "-c", Style.compositor === "sway" ? "swaymsg -t get_outputs" : "hyprctl -j monitors"]
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
                     const ms = JSON.parse(text);
+                    const key = Style.compositor === "sway" ? "dpms" : "dpmsStatus";
                     for (let i = 0; i < ms.length; i++) {
-                        if (ms[i] && ms[i].dpmsStatus === false) {
+                        if (ms[i] && ms[i][key] === false) {
                             console.log("[DPMS] startup probe: screen was off, waking");
                             lockScreen.screenOn();
                             break;

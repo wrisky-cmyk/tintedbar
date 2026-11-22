@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Window
 import Quickshell.Io
@@ -106,6 +107,14 @@ OverlayPanel {
         if (picker.showSel)
             showCtl.step(d);
     }
+
+    function currentRawLine() {
+        const i = list.currentIndex;
+        if (i < 0 || i >= picker.filtered.length)
+            return "";
+        return String(picker.filtered[i].raw);
+    }
+
     function pressSel(line) {
         if (picker.clearSel) {
             if (!picker.clearArmed) {
@@ -131,7 +140,7 @@ OverlayPanel {
             return;
         close();
 
-        copyProc.command = ["bash", "-c", "set -o pipefail; t=$(mktemp) || exit 1; " + "trap 'rm -f \"$t\"' EXIT; " + "printf '%s\\n' " + Style.sq(line) + " | cliphist decode > \"$t\" || exit 1; " + "[ -s \"$t\" ] || exit 1; wl-copy < \"$t\""];
+        copyProc.command = ["timeout", "15", "bash", "-c", "set -o pipefail; t=$(mktemp) || exit 1; " + "trap 'rm -f \"$t\"' EXIT; " + "printf '%s\\n' " + Style.sq(line) + " | cliphist decode > \"$t\" || exit 1; " + "[ -s \"$t\" ] || exit 1; wl-copy < \"$t\""];
         copyProc.running = true;
     }
 
@@ -148,7 +157,7 @@ OverlayPanel {
     Process {
         id: clipsLoad
         running: false
-        command: ["cliphist", "list"]
+        command: ["timeout", "15", "cliphist", "list"]
 
         onExited: {
             if (wipePendingReload) {
@@ -158,7 +167,7 @@ OverlayPanel {
         }
         stdout: StdioCollector {
             onStreamFinished: {
-                if (wipePendingReload)
+                if (picker.wipePendingReload)
                     return;
                 const out = [];
 
@@ -207,11 +216,11 @@ OverlayPanel {
     Process {
         id: wipeProc
         running: false
-        command: ["cliphist", "wipe"]
+        command: ["timeout", "15", "cliphist", "wipe"]
 
         onExited: exitCode => {
             if (clipsLoad.running)
-                wipePendingReload = true;
+                picker.wipePendingReload = true;
             else
                 clipsLoad.running = true;
         }
@@ -269,8 +278,8 @@ OverlayPanel {
                 event.accepted = true;
             }
         }
-        Keys.onReturnPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
-        Keys.onEnterPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
+        Keys.onReturnPressed: picker.pressSel(picker.currentRawLine())
+        Keys.onEnterPressed: picker.pressSel(picker.currentRawLine())
 
         Column {
             anchors.fill: parent
@@ -327,8 +336,8 @@ OverlayPanel {
                                 event.accepted = true;
                             }
                         }
-                        Keys.onReturnPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
-                        Keys.onEnterPressed: picker.pressSel(list.currentItem ? list.currentItem.rawLine : "")
+                        Keys.onReturnPressed: picker.pressSel(picker.currentRawLine())
+                        Keys.onEnterPressed: picker.pressSel(picker.currentRawLine())
                         Text {
                             anchors.fill: parent
                             visible: input.text === ""
@@ -344,10 +353,10 @@ OverlayPanel {
                     id: showCtl
                     height: searchRow.height
                     labelText: I18n.t("clips.show")
-                    value: qsRoot.clipMaxEntries
+                    value: picker.qsRoot.clipMaxEntries
 
                     sel: picker.showSel
-                    onStep: d => qsRoot.setClipMaxEntries(qsRoot.clipMaxEntries + d * 10)
+                    onStep: d => picker.qsRoot.setClipMaxEntries(picker.qsRoot.clipMaxEntries + d * 10)
                 }
 
                 Rectangle {
@@ -436,7 +445,7 @@ OverlayPanel {
                             anchors.fill: parent
                             radius: 6
 
-                            color: (rowMouse.containsMouse || (list.currentIndex === index && picker.headerSel === 0)) ? Style.hover : "transparent"
+                            color: (rowMouse.containsMouse || (list.currentIndex === row.index && picker.headerSel === 0)) ? Style.hover : "transparent"
                         }
 
                         Text {

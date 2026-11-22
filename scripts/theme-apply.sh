@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
 
 set -uo pipefail
-
-if command -v flock >/dev/null 2>&1; then
-  lock_dir=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}
-  lock_file="$lock_dir/tintedbar-theme-apply.${UID:-0}.lock"
-  exec 9>"$lock_file" || { echo "theme-apply: cannot open lock $lock_file" >&2; exit 1; }
-  if ! flock -w 10 9; then
-    echo "theme-apply: another instance is still running; skipping" >&2
-    exit 0
-  fi
-fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
 
@@ -54,7 +44,23 @@ fi
 
 if [ "${1:-}" = "--mode" ]; then printf '%s\n' "$mode"; exit 0; fi
 
-"$here/icon-follow.sh" "$mode" || echo "theme-apply: icon-follow failed (GTK settings.ini unchanged)" >&2
+if command -v flock >/dev/null 2>&1; then
+  lock_dir=${XDG_RUNTIME_DIR:-$HOME/.cache/tintedbar}
+  mkdir -p "$lock_dir" 2>/dev/null || true
+  lock_file="$lock_dir/tintedbar-theme-apply.${UID:-0}.lock"
+  exec 9>"$lock_file" || { echo "theme-apply: cannot open lock $lock_file" >&2; exit 1; }
+  if ! flock -w 10 9; then
+
+    echo "theme-apply: another instance is still running; skipped (retryable)" >&2
+    exit 75
+  fi
+fi
+
+icon_rc=0
+"$here/icon-follow.sh" "$mode" || icon_rc=$?
+if [ "$icon_rc" -ne 0 ]; then
+  echo "theme-apply: icon-follow failed (rc=$icon_rc); palette/GTK CSS were applied, icon theme left as-is" >&2
+fi
 
 if [ "$mode" = dark ]; then v=1; else v=0; fi
 set_prefer_dark() {
@@ -65,8 +71,9 @@ set_prefer_dark() {
       mkdir -p "${ini%/*}"
       printf '[Settings]\ngtk-application-prefer-dark-theme=1\n' > "$ini"
     fi
-  elif grep -q '^gtk-application-prefer-dark-theme=' "$ini"; then
-    sed -i "s/^gtk-application-prefer-dark-theme=.*/gtk-application-prefer-dark-theme=$v/" "$ini"
+  elif grep -q '^[[:space:]]*gtk-application-prefer-dark-theme=' "$ini"; then
+
+    sed -i "s/^\([[:space:]]*\)gtk-application-prefer-dark-theme=.*/\1gtk-application-prefer-dark-theme=$v/" "$ini"
   elif grep -q '^\[Settings\]' "$ini"; then
     sed -i "/^\[Settings\]/a gtk-application-prefer-dark-theme=$v" "$ini"
   else
@@ -155,3 +162,57 @@ if [ -f "$theme_dir/gtk-4.0/gtk.css" ]; then
     rm -f "$tmp"
   fi
 fi
+
+if [ -f "$theme_dir/gtk-3.0/gtk.css" ]; then
+  dst="$cfg/gtk-3.0/gtk.css"
+  mkdir -p "${dst%/*}"
+
+  ours=1
+  if [ -f "$dst" ]; then
+    ours=
+    first=
+    IFS= read -r first <"$dst" || true
+    case "$first" in "/* quickshell theme-apply: generated"*) ours=1 ;; esac
+    if [ -z "$ours" ]; then
+      cmp -s -- "$dst" "$theme_dir/gtk-3.0/gtk.css" && ours=1
+    fi
+    if [ -z "$ours" ]; then
+      cmp -s -- "$dst" "$theme_dir/gtk-3.0/gtk-dark.css" && ours=1
+    fi
+    if [ -z "$ours" ]; then
+
+      if [ ! -f "$dst.user-backup" ]; then
+        cp -p -- "$dst" "$dst.user-backup" 2>/dev/null || true
+      fi
+      echo "theme-apply: $dst is a user override, leaving it untouched (backup: $dst.user-backup)" >&2
+      ours=0
+    fi
+  fi
+  [ "$ours" = "1" ] || dst=
+fi
+if [ -n "${dst:-}" ]; then
+  if [ "$mode" = dark ]; then
+    variant='gtk-dark.css'
+  else
+    variant='gtk.css'
+  fi
+  [ -f "$theme_dir/gtk-3.0/$variant" ] || variant='gtk.css'
+  if ! tmp=$(mktemp "${dst}.XXXXXX"); then
+    echo "theme-apply: failed to create temp file, skipping GTK3 CSS swap" >&2
+    exit 0
+  fi
+
+  if {
+    printf '/* quickshell theme-apply: generated from %s/%s, do not edit */\n' \
+      "$theme_dir/gtk-3.0" "$variant"
+    cat -- "$theme_dir/gtk-3.0/$variant"
+  } >"$tmp"; then
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$dst" || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+fi
+
+[ "$icon_rc" -eq 0 ] || exit 76
+exit 0

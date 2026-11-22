@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell.Widgets
 
@@ -110,7 +111,7 @@ Item {
 
                 FileIcon {
                     id: trayF
-                    iconName: modelData.icon
+                    iconName: trayItem.modelData.icon
                     onIconNameChanged: trayItem.reloadTries = 0
                 }
 
@@ -130,12 +131,12 @@ Item {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     cursorShape: Qt.PointingHandCursor
                     onClicked: mouse => {
-                        if (mouse.button === Qt.RightButton && modelData.hasMenu) {
-                            const pos = trayItem.mapToItem(panel.contentItem, 0, 0);
+                        if (mouse.button === Qt.RightButton && trayItem.modelData.hasMenu) {
+                            const pos = trayItem.mapToItem(trayModule.panel.contentItem, 0, 0);
 
-                            modelData.display(panel, Math.round(pos.x), Math.round(pos.y) + Style.barHeight);
+                            trayItem.modelData.display(trayModule.panel, Math.round(pos.x), Math.round(pos.y) + Style.barHeight);
                         } else {
-                            modelData.activate();
+                            trayItem.modelData.activate();
                         }
                     }
                 }

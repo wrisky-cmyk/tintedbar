@@ -1,11 +1,12 @@
 import QtQuick
 import Quickshell
 
-PopupWindow {
+PopupPanel {
     id: brightnessPopup
 
-    required property var panel
     required property var brightnessModule
+
+    anchorItem: brightnessPopup.brightnessModule
 
     visible: false
     function open() {
@@ -20,20 +21,13 @@ PopupWindow {
         brightnessPopup.visible = false;
     }
 
-    color: "transparent"
     implicitWidth: 224
     implicitHeight: 48 + Style.barHeight + 2 - Style.barInset
-    grabFocus: true
-    anchor.window: panel
-    anchor.item: brightnessPopup.brightnessModule
-    anchor.edges: Edges.Bottom
-    anchor.gravity: Edges.Top
 
     Rectangle {
         id: brCard
         anchors.fill: parent
-
-        anchors.topMargin: Style.barHeight + 2 - Style.barInset
+        anchors.topMargin: brightnessPopup.cardTopMargin
         radius: 12
         color: Style.card
         border.width: 1

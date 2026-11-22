@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 
 Module {
     id: wiredModule
@@ -39,7 +38,7 @@ Module {
 
         Text {
             id: wiredNameText
-            visible: qsRoot.showNetIface && wiredModule.wired !== null
+            visible: wiredModule.qsRoot.showNetIface && wiredModule.wired !== null
             anchors.verticalCenter: parent.verticalCenter
             color: Style.text2
             font.family: Style.nerd

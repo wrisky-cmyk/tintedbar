@@ -123,7 +123,7 @@ Item {
 
         onClicked: m => {
             if (m.button === Qt.RightButton)
-                qsRoot.audioToggleMute("right-click(slider)");
+                volSlider.qsRoot.audioToggleMute("right-click(slider)");
         }
     }
 

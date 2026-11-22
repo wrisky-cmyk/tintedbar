@@ -16,6 +16,7 @@ ShellRoot {
     readonly property alias rootRef: qsRoot
     readonly property alias weatherRef: weather
     readonly property alias notifCenterRef: notifCenter
+    readonly property var powerFlowRef: powerFlow
 
     property bool showTerminal: false
     property bool showBrowser: false
@@ -39,6 +40,8 @@ ShellRoot {
     property bool showBtDevice: false
     property int clipMaxEntries: 50
     property bool showNetSpeed: false
+    property bool showWallpaper: false
+    property bool autoTheme: false
     property bool showClockSeconds: false
     property bool clock24: true
 
@@ -65,25 +68,326 @@ ShellRoot {
 
     property bool launcherEmptyWs: true
 
-    property var launcherByScreen: ({})
-    property var clipsByScreen: ({})
-    property var powerMenuByScreen: ({})
+    ScreenPanels {
+        id: screenPanels
+    }
 
-    property var promptByScreen: ({})
+    Item {
+        id: powerFlow
 
-    property var settingsByScreen: ({})
+        property var blockInhibitors: []
+        readonly property bool hasBlockers: blockInhibitors.length > 0
 
-    property var brightnessByScreen: ({})
+        readonly property string blockerNames: blockInhibitors.map(b => b.who).join(I18n.effectiveLang === "zh" ? "、" : ", ")
 
-    property var pomodoroByScreen: ({})
+        property bool notifyAfterProbe: false
 
-    property var calendarByScreen: ({})
-    property var weatherPopupByScreen: ({})
-    property var trayRowByScreen: ({})
+        property string pendingOp: "poweroff"
+
+        property int myUid: -1
+
+        Component.onCompleted: if (!uidProc.running)
+            uidProc.running = true
+
+        Process {
+            id: uidProc
+            command: ["sh", "-c", "id -u"]
+            running: false
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const n = parseInt(String(text).trim());
+                    powerFlow.myUid = Number.isNaN(n) ? -1 : n;
+                }
+            }
+        }
+
+        Process {
+            id: inhibitProbe
+            command: ["busctl", "call", "--json=short", "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager", "ListInhibitors"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    let list = null;
+                    try {
+                        list = [];
+
+                        for (const it of JSON.parse(text).data[0])
+                            if (it.length >= 4 && it[3] === "block" && String(it[0]).split(":").indexOf("shutdown") >= 0)
+                                list.push({
+                                    what: String(it[0]),
+                                    who: String(it[1]),
+                                    mode: String(it[3]),
+                                    uid: it.length > 4 ? Number(it[4]) : -1,
+                                    pid: it.length > 5 ? Number(it[5]) : -1
+                                });
+                    } catch (e) {
+                        list = null;
+                    }
+                    if (list !== null) {
+                        powerFlow.blockInhibitors = list;
+                        powerFlow.blockersFreshAt = Date.now();
+                    }
+
+                    if (list !== null) {
+                        if (powerFlow.pendingForceOp !== "")
+                            powerFlow.resolveForce(true);
+                        else if (powerFlow.graceful)
+                            powerFlow.gracefulEvaluate();
+                        else if (powerFlow.notifyAfterProbe) {
+                            powerFlow.notifyAfterProbe = false;
+                            powerFlow.notifyBlocked();
+                        }
+                    }
+                }
+            }
+
+            onExited: code => {
+                if (powerFlow.pendingForceOp !== "" && code !== 0) {
+                    powerFlow.resolveForce(false);
+                } else if (powerFlow.graceful && code !== 0) {
+                    powerFlow.gracefulEvaluate();
+                } else if (powerFlow.notifyAfterProbe && code !== 0) {
+                    powerFlow.notifyAfterProbe = false;
+                    powerFlow.notifyBlocked();
+                }
+            }
+        }
+
+        function notifyBlocked() {
+            notifyWatchdog.stop();
+            const names = powerFlow.blockerNames;
+            const op = powerFlow.pendingOp === "reboot" ? "reboot" : "poweroff";
+            const actionId = op + "-force";
+            const actionLabel = I18n.t(op === "reboot" ? "power.forceReboot" : "power.forcePoweroff");
+            if (blockedNotifyProc.running)
+                return;
+
+            const title = names !== "" ? I18n.t("power.inhibit") : I18n.t("power.failed");
+            const body = names !== "" ? I18n.t("power.inhibitBody") + names : I18n.t("power.failedBody");
+            blockedNotifyProc.command = ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", title, body, "[" + Style.gvStr(actionId) + ", " + Style.gvStr(actionLabel) + "]", "{\"urgency\": <byte 2>, \"x-quickshell-power\": <\"" + op + "\">}", 20000];
+            blockedNotifyProc.running = true;
+        }
+
+        Process {
+            id: blockedNotifyProc
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    if (text.trim() !== "")
+                        console.log("[POWER] blocked-notify stderr: " + text.trim());
+                }
+            }
+            onExited: code => {
+                if (code !== 0)
+                    console.log("[POWER] blocked-notify failed, gdbus exit " + code);
+            }
+        }
+
+        function probeBlockersThenNotify() {
+            powerFlow.notifyAfterProbe = true;
+            notifyWatchdog.restart();
+            if (!inhibitProbe.running)
+                inhibitProbe.running = true;
+        }
+
+        Timer {
+            id: notifyWatchdog
+            interval: 1500
+            onTriggered: {
+                if (powerFlow.notifyAfterProbe) {
+                    powerFlow.notifyAfterProbe = false;
+                    powerFlow.notifyBlocked();
+                }
+            }
+        }
+
+        function probeBlockers() {
+            if (!inhibitProbe.running)
+                inhibitProbe.running = true;
+        }
+        function blockersDump() {
+            return JSON.stringify(powerFlow.blockInhibitors);
+        }
+
+        property var graceful: null
+        readonly property int gracefulTermMs: 6000
+        readonly property int gracefulKillMs: 10000
+
+        property real blockersFreshAt: 0
+
+        property string pendingForceOp: ""
+
+        function requestGracefulForce(op) {
+            powerFlow.pendingForceOp = op;
+            forceWatchdog.restart();
+
+            if (powerFlow.myUid < 0 && !uidProc.running)
+                uidProc.running = true;
+            if (!inhibitProbe.running)
+                inhibitProbe.running = true;
+        }
+
+        function resolveForce(fresh) {
+            const op = powerFlow.pendingForceOp;
+            powerFlow.pendingForceOp = "";
+            forceWatchdog.stop();
+            if (op === "")
+                return;
+
+            powerFlow.graceful = null;
+            gracefulTick.stop();
+            if (!fresh) {
+                powerFlow.forceFallback(op);
+                return;
+            }
+            if (powerFlow.blockInhibitors.length === 0) {
+                powerFlow.run(op === "reboot" ? "systemctl reboot" : "systemctl poweroff");
+                return;
+            }
+            if (powerFlow.gracefulForce(op))
+                return;
+            powerFlow.forceFallback(op);
+        }
+
+        function forceFallback(op) {
+            powerFlow.pendingOp = op;
+
+            if (actionProc.running) {
+                console.log("[POWER] fallback in flight, drop: " + op);
+                return;
+            }
+            actionProc.command = ["bash", "-c", op === "reboot" ? "systemctl reboot -i" : "systemctl poweroff -i"];
+            actionProc.running = true;
+        }
+
+        function gracefulForce(op) {
+            const pids = Style.gracefulCandidates(powerFlow.blockInhibitors, powerFlow.myUid);
+            if (pids.length === 0)
+                return false;
+
+            powerFlow.pendingOp = op;
+            powerFlow.graceful = {
+                op: op,
+                phase: "term",
+                started: Date.now()
+            };
+            gracefulKill("TERM", pids);
+            gracefulTick.restart();
+            return true;
+        }
+
+        function gracefulKill(sig, pids) {
+            const cmd = ["bash", "-c", "kill -" + sig + " " + pids.join(" ") + " 2>/dev/null; true"];
+
+            const p = sig === "TERM" ? termProc : killProc;
+            if (!p.running) {
+                p.command = cmd;
+                p.running = true;
+            }
+        }
+
+        function gracefulEvaluate() {
+            const g = powerFlow.graceful;
+            if (!g)
+                return;
+            if (!powerFlow.hasBlockers) {
+                powerFlow.graceful = null;
+                gracefulTick.stop();
+                powerFlow.run(g.op === "reboot" ? "systemctl reboot" : "systemctl poweroff");
+                return;
+            }
+            const elapsed = Date.now() - g.started;
+            if (g.phase === "term" && elapsed >= powerFlow.gracefulTermMs) {
+                g.phase = "kill";
+
+                if (powerFlow.blockersFreshAt >= g.started) {
+                    const pids = [];
+                    for (const b of powerFlow.blockInhibitors)
+                        if (b.pid > 0 && b.uid >= 0 && b.uid === powerFlow.myUid)
+                            pids.push(b.pid);
+                    if (pids.length > 0)
+                        gracefulKill("KILL", pids);
+                }
+            }
+            if (elapsed >= powerFlow.gracefulKillMs) {
+                powerFlow.graceful = null;
+                gracefulTick.stop();
+                powerFlow.notifyBlocked();
+                return;
+            }
+            gracefulTick.restart();
+        }
+
+        Timer {
+            id: gracefulTick
+            interval: 700
+            onTriggered: {
+                if (!powerFlow.graceful)
+                    return;
+                powerFlow.gracefulEvaluate();
+                if (powerFlow.graceful && !inhibitProbe.running)
+                    inhibitProbe.running = true;
+            }
+        }
+
+        Timer {
+            id: forceWatchdog
+            interval: 1500
+            onTriggered: {
+                if (powerFlow.pendingForceOp !== "")
+                    powerFlow.resolveForce(false);
+            }
+        }
+
+        Process {
+            id: termProc
+            running: false
+        }
+
+        Process {
+            id: killProc
+            running: false
+        }
+
+        function run(cmd) {
+            if (String(cmd).indexOf("systemctl poweroff") === 0 || String(cmd).indexOf("systemctl reboot") === 0) {
+                powerFlow.pendingOp = String(cmd).indexOf("systemctl reboot") === 0 ? "reboot" : "poweroff";
+
+                if (actionProc.running) {
+                    console.log("[POWER] action still in flight, drop: " + cmd);
+                    return;
+                }
+                actionProc.command = ["bash", "-c", cmd];
+                actionProc.running = true;
+                return;
+            }
+            Quickshell.execDetached(["bash", "-c", cmd]);
+        }
+
+        Process {
+            id: actionProc
+            onExited: code => {
+                if (code === 0)
+                    return;
+                powerFlow.probeBlockersThenNotify();
+            }
+        }
+    }
+
+    property alias launcherByScreen: screenPanels.launcherByScreen
+    property alias clipsByScreen: screenPanels.clipsByScreen
+    property alias powerMenuByScreen: screenPanels.powerMenuByScreen
+    property alias promptByScreen: screenPanels.promptByScreen
+    property alias settingsByScreen: screenPanels.settingsByScreen
+    property alias brightnessByScreen: screenPanels.brightnessByScreen
+    property alias pomodoroByScreen: screenPanels.pomodoroByScreen
+    property alias calendarByScreen: screenPanels.calendarByScreen
+    property alias weatherPopupByScreen: screenPanels.weatherPopupByScreen
+    property alias trayRowByScreen: screenPanels.trayRowByScreen
 
     function focusedScreenName() {
         if (Style.compositor === "niri")
             return Compositor.niriFocusedOutput;
+        if (Style.compositor === "sway")
+            return Compositor.swayFocusedOutput;
         try {
             return Hyprland.focusedMonitor ? String(Hyprland.focusedMonitor.name) : "";
         } catch (e) {
@@ -91,13 +395,47 @@ ShellRoot {
         }
     }
 
+    function launcherToggle() {
+        const k = focusedScreenName();
+        const cur = launcherByScreen[k] === true;
+        screenPanels.setActive("launcher", k, !cur);
+    }
+    function launcherSet(v) {
+        screenPanels.setActive("launcher", focusedScreenName(), v === true);
+    }
+    function clipsToggle() {
+        const k = focusedScreenName();
+        const cur = clipsByScreen[k] === true;
+        screenPanels.setActive("clips", k, !cur);
+    }
+    function clipsSet(v) {
+        screenPanels.setActive("clips", focusedScreenName(), v === true);
+    }
+
+    function panelToggle(role) {
+        const k = focusedScreenName();
+        screenPanels.setActive(role, k, !screenPanels.activeFlag(role, k));
+    }
+    function panelSet(role, v) {
+        screenPanels.setActive(role, focusedScreenName(), v === true);
+    }
+    function weatherSetEdit(v) {
+        if (v === true)
+            weatherEditRequested = true;
+        screenPanels.setActive("weather", focusedScreenName(), v === true);
+    }
+    property bool weatherEditRequested: false
+
     property string polkitScreenKey: ""
 
     function polkitHere(key) {
-        if (qsRoot.polkitScreenKey !== "")
-            return key === qsRoot.polkitScreenKey;
+        const names = Quickshell.screens.map(s => String(s.name));
+        if (qsRoot.polkitScreenKey !== "") {
+            if (names.indexOf(qsRoot.polkitScreenKey) >= 0)
+                return key === qsRoot.polkitScreenKey;
+        }
 
-        return Quickshell.screens.length > 0 && key === String(Quickshell.screens[0].name);
+        return names.length > 0 && key === names[0];
     }
 
     function polkitState() {
@@ -125,7 +463,7 @@ ShellRoot {
     }
 
     function panelForFocused(map) {
-        return map[qsRoot.focusedScreenName()] || Object.values(map)[0] || null;
+        return screenPanels.forFocused(map, qsRoot.focusedScreenName());
     }
 
     function brightnessIpcState() {
@@ -222,6 +560,12 @@ ShellRoot {
             group: "idle"
         },
         {
+            key: "autoTheme",
+            labelKey: "flag.autoTheme",
+            group: "display",
+            hidden: true
+        },
+        {
             key: "showWeather",
             labelKey: "flag.showWeather",
             group: "module"
@@ -239,6 +583,11 @@ ShellRoot {
         {
             key: "showPrivacy",
             labelKey: "flag.showPrivacy",
+            group: "module"
+        },
+        {
+            key: "showWallpaper",
+            labelKey: "flag.showWallpaper",
             group: "module"
         },
         {
@@ -285,28 +634,153 @@ ShellRoot {
 
     readonly property var showFlags: barFlagList.map(f => f.key)
 
+    readonly property var numberSettings: [
+        {
+            key: "historyLimit",
+            min: 5,
+            max: 500,
+            step: 5,
+            read: () => notifCenter.historyLimit,
+            write: v => notifCenter.historyLimit = v,
+            after: () => notifCenter.applyHistoryLimit()
+        },
+        {
+            key: "barHeight",
+            min: 24,
+            max: 48,
+            step: 1,
+            read: () => Style.barHeight,
+            write: v => Style.barHeight = v
+        },
+        {
+            key: "clipMaxEntries",
+            min: 10,
+            max: 200,
+            step: 10,
+            read: () => qsRoot.clipMaxEntries,
+            write: v => qsRoot.clipMaxEntries = v
+        },
+        {
+            key: "idleLockMinutes",
+            min: 0,
+            max: 60,
+            step: 1,
+            read: () => qsRoot.idleLockMinutes,
+            write: v => qsRoot.idleLockMinutes = v
+        },
+        {
+            key: "idleDpmsMinutes",
+            min: 0,
+            max: 60,
+            step: 1,
+            read: () => qsRoot.idleDpmsMinutes,
+            write: v => qsRoot.idleDpmsMinutes = v
+        },
+        {
+            key: "pomodoroFocusMin",
+            min: 1,
+            max: 60,
+            step: 1,
+            read: () => qsRoot.pomodoroFocusMin,
+            write: v => qsRoot.pomodoroFocusMin = v
+        },
+        {
+            key: "pomodoroBreakMin",
+            min: 1,
+            max: 30,
+            step: 1,
+            read: () => qsRoot.pomodoroBreakMin,
+            write: v => qsRoot.pomodoroBreakMin = v
+        },
+        {
+            key: "pomodoroLongMin",
+            min: 5,
+            max: 45,
+            step: 5,
+            read: () => qsRoot.pomodoroLongMin,
+            write: v => qsRoot.pomodoroLongMin = v
+        },
+        {
+            key: "pomodoroLongEvery",
+            min: 2,
+            max: 8,
+            step: 1,
+            read: () => qsRoot.pomodoroLongEvery,
+            write: v => qsRoot.pomodoroLongEvery = v
+        }
+    ]
+    function numberSetting(key) {
+        for (const s of qsRoot.numberSettings)
+            if (s.key === key)
+                return s;
+        return null;
+    }
+
+    function normalizeNumber(spec, raw) {
+        if (typeof raw !== "number" || !isFinite(raw))
+            return null;
+        const stepped = Math.round(raw / spec.step) * spec.step;
+        return Math.max(spec.min, Math.min(spec.max, stepped));
+    }
+
+    function restoreNumber(key, raw) {
+        const s = qsRoot.numberSetting(key);
+        if (!s)
+            return;
+        const v = qsRoot.normalizeNumber(s, raw);
+        if (v !== null)
+            s.write(v);
+    }
+
+    function applyNumberSetting(key, raw) {
+        const s = qsRoot.numberSetting(key);
+        if (!s)
+            return;
+        const v = qsRoot.normalizeNumber(s, raw);
+        if (v === null || v === s.read())
+            return;
+        s.write(v);
+        if (s.after)
+            s.after();
+        qsRoot.saveBarSettings();
+    }
+
+    readonly property var extraSettings: [
+        {
+            key: "idleInhibited",
+            valid: v => typeof v === "boolean",
+            read: () => qsRoot.idleInhibited,
+            write: v => qsRoot.idleInhibited = v
+        },
+        {
+            key: "dnd",
+            valid: v => typeof v === "boolean",
+            read: () => notifCenter.dnd,
+            write: v => notifCenter.dnd = v
+        },
+        {
+            key: "lang",
+            valid: v => v === "auto" || I18n.langCodes.indexOf(v) >= 0,
+            read: () => I18n.lang,
+            write: v => I18n.lang = v
+        },
+        {
+            key: "paletteName",
+            valid: v => v === "auto" || Style.paletteIds.indexOf(v) >= 0,
+            read: () => Style.paletteName,
+            write: v => Style.paletteName = v
+        }
+    ]
+
     readonly property string home: Quickshell.env("HOME") || Quickshell.env("TMPDIR") || "/tmp"
-    readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (qsRoot.home + "/.local/state")) + "/quickshell"
+    readonly property string stateDir: Style.stateDir
 
     function saveBarSettings() {
         if (!qsRoot.barSettingsLoaded) {
             qsRoot.barSettingsPending = true;
             return;
         }
-        barSettingsSaveDebounce.restart();
-    }
-
-    Timer {
-        id: barSettingsSaveDebounce
-        interval: 200
-        onTriggered: {
-            if (barSettingsSave.running) {
-                restart();
-                return;
-            }
-            barSettingsSave.command = ["sh", "-c", Style.atomicWriteCmd(qsRoot.stateDir + "/bar-settings.json", JSON.stringify(qsRoot.barSettingsObj()))];
-            barSettingsSave.running = true;
-        }
+        barSettingsStore.requestSave();
     }
 
     function setBarFlag(key, value) {
@@ -323,90 +797,39 @@ ShellRoot {
         const o = {};
         for (const k of qsRoot.showFlags)
             o[k] = qsRoot[k];
-        o.barHeight = Style.barHeight;
-        o.historyLimit = notifCenter.historyLimit;
-        o.clipMaxEntries = qsRoot.clipMaxEntries;
-        o.idleLockMinutes = qsRoot.idleLockMinutes;
-        o.idleDpmsMinutes = qsRoot.idleDpmsMinutes;
-        o.pomodoroFocusMin = qsRoot.pomodoroFocusMin;
-        o.pomodoroBreakMin = qsRoot.pomodoroBreakMin;
-        o.pomodoroLongMin = qsRoot.pomodoroLongMin;
-        o.pomodoroLongEvery = qsRoot.pomodoroLongEvery;
-        o.idleInhibited = qsRoot.idleInhibited;
-        o.dnd = notifCenter.dnd;
-        o.lang = I18n.lang;
-        o.paletteName = Style.paletteName;
+        for (const s of qsRoot.numberSettings)
+            o[s.key] = s.read();
+        for (const s of qsRoot.extraSettings)
+            o[s.key] = s.read();
         return o;
     }
 
     function setHistoryLimit(v) {
-        v = Math.max(5, Math.min(500, Math.round(v / 5) * 5));
-        if (v === notifCenter.historyLimit)
-            return;
-        notifCenter.historyLimit = v;
-
-        notifCenter.applyHistoryLimit();
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("historyLimit", v);
     }
-
     function setClipMaxEntries(v) {
-        v = Math.max(10, Math.min(200, Math.round(v / 10) * 10));
-        if (v === qsRoot.clipMaxEntries)
-            return;
-        qsRoot.clipMaxEntries = v;
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("clipMaxEntries", v);
     }
-
     function setBarHeight(v) {
-        v = Math.max(24, Math.min(48, Math.round(v)));
-        if (v === Style.barHeight)
-            return;
-        Style.barHeight = v;
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("barHeight", v);
     }
-
     function setIdleLockMinutes(v) {
-        v = Math.max(0, Math.min(60, Math.round(v)));
-        if (v === qsRoot.idleLockMinutes)
-            return;
-        qsRoot.idleLockMinutes = v;
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("idleLockMinutes", v);
+    }
+    function setIdleDpmsMinutes(v) {
+        qsRoot.applyNumberSetting("idleDpmsMinutes", v);
     }
     function setPomodoroFocusMin(v) {
-        v = Math.max(1, Math.min(60, Math.round(v)));
-        if (v === qsRoot.pomodoroFocusMin)
-            return;
-        qsRoot.pomodoroFocusMin = v;
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("pomodoroFocusMin", v);
     }
     function setPomodoroBreakMin(v) {
-        v = Math.max(1, Math.min(30, Math.round(v)));
-        if (v === qsRoot.pomodoroBreakMin)
-            return;
-        qsRoot.pomodoroBreakMin = v;
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("pomodoroBreakMin", v);
     }
     function setPomodoroLongMin(v) {
-        v = Math.max(5, Math.min(45, Math.round(v / 5) * 5));
-        if (v === qsRoot.pomodoroLongMin)
-            return;
-        qsRoot.pomodoroLongMin = v;
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("pomodoroLongMin", v);
     }
     function setPomodoroLongEvery(v) {
-        v = Math.max(2, Math.min(8, Math.round(v)));
-        if (v === qsRoot.pomodoroLongEvery)
-            return;
-        qsRoot.pomodoroLongEvery = v;
-        qsRoot.saveBarSettings();
-    }
-
-    function setIdleDpmsMinutes(v) {
-        v = Math.max(0, Math.min(60, Math.round(v)));
-        if (v === qsRoot.idleDpmsMinutes)
-            return;
-        qsRoot.idleDpmsMinutes = v;
-        qsRoot.saveBarSettings();
+        qsRoot.applyNumberSetting("pomodoroLongEvery", v);
     }
 
     function setIdleInhibited(v) {
@@ -446,24 +869,27 @@ ShellRoot {
     }
 
     Process {
-        id: barSettingsSave
-        running: false
-        onExited: exitCode => {
-            if (exitCode !== 0)
-                console.warn("[QS] bar-settings save failed, exitCode " + exitCode);
-        }
-    }
-
-    Process {
         id: themeApply
         running: true
         command: ["sh", "-c", "exec " + Style.sq(Style.configDir + "/scripts/theme-apply.sh")]
-        onExited: {
+        onExited: code => {
+            if (code === 75) {
+                themeApplyRetry.restart();
+                return;
+            }
             if (qsRoot.themeApplyPending) {
                 qsRoot.themeApplyPending = false;
                 themeApply.running = true;
             }
         }
+    }
+
+    Timer {
+        id: themeApplyRetry
+        interval: 700
+        repeat: false
+        onTriggered: if (!themeApply.running)
+            themeApply.running = true
     }
 
     property bool themeApplyPending: false
@@ -490,75 +916,41 @@ ShellRoot {
         }
     }
 
-    Process {
-        id: barSettingsLoad
-        running: true
-        command: ["sh", "-c", Style.readJsonCmd(qsRoot.stateDir + "/bar-settings.json", "{}")]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                let saved = {};
-                try {
-                    saved = JSON.parse(text);
-                } catch (e) {}
-                if (!saved || typeof saved !== "object" || Array.isArray(saved))
-                    saved = {};
+    JsonStore {
+        id: barSettingsStore
+        path: qsRoot.stateDir + "/bar-settings.json"
+        defaultText: "{}"
 
-                const num = v => {
-                    if (typeof v !== "number")
-                        return null;
-                    return isFinite(v) ? v : null;
-                };
-                for (const k of qsRoot.showFlags)
-                    if (saved[k] !== undefined)
-                        qsRoot[k] = saved[k] === true;
-                const bh = num(saved.barHeight);
-                if (bh !== null)
-                    Style.barHeight = Math.max(24, Math.min(48, bh));
-                const hl = num(saved.historyLimit);
-                if (hl !== null)
-                    notifCenter.historyLimit = Math.max(5, Math.min(500, Math.round(hl / 5) * 5));
-                const cm = num(saved.clipMaxEntries);
-                if (cm !== null)
-                    qsRoot.clipMaxEntries = Math.max(10, Math.min(200, cm));
-                const il = num(saved.idleLockMinutes);
-                if (il !== null)
-                    qsRoot.idleLockMinutes = Math.max(0, Math.min(60, il));
-                const idm = num(saved.idleDpmsMinutes);
-                if (idm !== null)
-                    qsRoot.idleDpmsMinutes = Math.max(0, Math.min(60, idm));
-                const pfm = num(saved.pomodoroFocusMin);
-                if (pfm !== null)
-                    qsRoot.pomodoroFocusMin = Math.max(1, Math.min(60, pfm));
-                const pbm = num(saved.pomodoroBreakMin);
-                if (pbm !== null)
-                    qsRoot.pomodoroBreakMin = Math.max(1, Math.min(30, pbm));
-                const plm = num(saved.pomodoroLongMin);
-                if (plm !== null)
-                    qsRoot.pomodoroLongMin = Math.max(5, Math.min(45, plm));
-                const ppp = num(saved.pomodoroLongEvery);
-                if (ppp !== null)
-                    qsRoot.pomodoroLongEvery = Math.max(2, Math.min(8, ppp));
-                if (saved.idleInhibited !== undefined)
-                    qsRoot.idleInhibited = saved.idleInhibited === true;
+        serialize: () => JSON.stringify(qsRoot.barSettingsObj())
+        onSaveFailed: (code, failures) => console.warn("[QS] bar-settings save failed, exitCode " + code)
+        onTextLoaded: text => {
+            let saved = {};
+            try {
+                saved = JSON.parse(text);
+            } catch (e) {}
+            if (!saved || typeof saved !== "object" || Array.isArray(saved))
+                saved = {};
+            for (const k of qsRoot.showFlags)
+                if (saved[k] !== undefined)
+                    qsRoot[k] = saved[k] === true;
 
-                if (saved.dnd !== undefined)
-                    notifCenter.dnd = saved.dnd === true;
+            for (const s of qsRoot.numberSettings)
+                if (saved[s.key] !== undefined)
+                    qsRoot.restoreNumber(s.key, saved[s.key]);
 
-                if (!qsRoot.showIdleInhibitor)
-                    qsRoot.idleInhibited = false;
-                if (saved.lang === "auto" || I18n.langCodes.indexOf(saved.lang) >= 0)
-                    I18n.lang = saved.lang;
+            for (const s of qsRoot.extraSettings)
+                if (saved[s.key] !== undefined && s.valid(saved[s.key]))
+                    s.write(saved[s.key]);
 
-                if (saved.paletteName === "auto" || Style.paletteIds.indexOf(saved.paletteName) >= 0)
-                    Style.paletteName = saved.paletteName;
+            if (!qsRoot.showIdleInhibitor)
+                qsRoot.idleInhibited = false;
 
-                qsRoot.barSettingsLoaded = true;
-                if (qsRoot.barSettingsPending) {
-                    qsRoot.barSettingsPending = false;
-                    qsRoot.saveBarSettings();
-                }
-                qsRoot.settleHistoryLimit();
+            qsRoot.barSettingsLoaded = true;
+            if (qsRoot.barSettingsPending) {
+                qsRoot.barSettingsPending = false;
+                qsRoot.saveBarSettings();
             }
+            qsRoot.settleHistoryLimit();
         }
     }
 
@@ -585,295 +977,30 @@ ShellRoot {
         }
     }
 
-    IpcHandler {
-        target: "launcher"
-
-        function toggle(): void {
-            const l = qsRoot.panelForFocused(qsRoot.launcherByScreen);
-            if (l) {
-                l.visible ? l.close() : l.open();
-            }
-        }
-        function open(): void {
-            const l = qsRoot.panelForFocused(qsRoot.launcherByScreen);
-            if (l) {
-                l.open();
-            }
-        }
-        function close(): void {
-            const l = qsRoot.panelForFocused(qsRoot.launcherByScreen);
-            if (l) {
-                l.close();
-            }
-        }
-    }
-
-    IpcHandler {
-        target: "clips"
-
-        function toggle(): void {
-            const l = qsRoot.panelForFocused(qsRoot.clipsByScreen);
-            if (l) {
-                l.visible ? l.close() : l.open();
-            }
-        }
-        function open(): void {
-            const l = qsRoot.panelForFocused(qsRoot.clipsByScreen);
-            if (l) {
-                l.open();
-            }
-        }
-        function close(): void {
-            const l = qsRoot.panelForFocused(qsRoot.clipsByScreen);
-            if (l) {
-                l.close();
-            }
-        }
-    }
-
-    IpcHandler {
-        target: "powermenu"
-
-        function toggle(): void {
-            const l = qsRoot.panelForFocused(qsRoot.powerMenuByScreen);
-            if (l) {
-                l.visible ? l.close() : l.open();
-            }
-        }
-        function open(): void {
-            const l = qsRoot.panelForFocused(qsRoot.powerMenuByScreen);
-            if (l) {
-                l.open();
-            }
-        }
-        function close(): void {
-            const l = qsRoot.panelForFocused(qsRoot.powerMenuByScreen);
-            if (l) {
-                l.close();
-            }
-        }
-
-        function probe(): void {
-            const l = qsRoot.panelForFocused(qsRoot.powerMenuByScreen);
-            if (l)
-                l.probeBlockers();
-        }
-        function blockers(): string {
-            const l = qsRoot.panelForFocused(qsRoot.powerMenuByScreen);
-            return l ? l.blockersDump() : "[]";
-        }
-    }
-
-    IpcHandler {
-        target: "settings"
-
-        function toggle(): void {
-            const l = qsRoot.panelForFocused(qsRoot.settingsByScreen);
-            if (l) {
-                l.visible ? l.close() : l.open();
-            }
-        }
-        function open(): void {
-            const l = qsRoot.panelForFocused(qsRoot.settingsByScreen);
-            if (l) {
-                l.open();
-            }
-        }
-        function close(): void {
-            const l = qsRoot.panelForFocused(qsRoot.settingsByScreen);
-            if (l) {
-                l.close();
-            }
-        }
-    }
-
-    IpcHandler {
-        target: "calendar"
-
-        function toggle(): void {
-            const l = qsRoot.panelForFocused(qsRoot.calendarByScreen);
-            if (l) {
-                l.toggle();
-            }
-        }
-        function open(): void {
-            const l = qsRoot.panelForFocused(qsRoot.calendarByScreen);
-            if (l) {
-                l.open();
-            }
-        }
-        function close(): void {
-            const l = qsRoot.panelForFocused(qsRoot.calendarByScreen);
-            if (l) {
-                l.close();
-            }
-        }
-    }
-
-    IpcHandler {
-        target: "weather"
-
-        function open(): void {
-            const l = qsRoot.panelForFocused(qsRoot.weatherPopupByScreen);
-            if (l) {
-                l.open();
-            }
-        }
-        function toggle(): void {
-            const l = qsRoot.panelForFocused(qsRoot.weatherPopupByScreen);
-            if (l) {
-                l.toggle();
-            }
-        }
-        function close(): void {
-            const l = qsRoot.panelForFocused(qsRoot.weatherPopupByScreen);
-            if (l) {
-                l.close();
-            }
-        }
-    }
-
-    IpcHandler {
-        target: "tray"
-
-        function menu(): string {
-            const r = qsRoot.panelForFocused(qsRoot.trayRowByScreen);
-            if (!r)
-                return "no-tray";
-            return r.openMenu("") ? "opened" : "no-menu";
-        }
-
-        function menuOf(id: string): string {
-            const r = qsRoot.panelForFocused(qsRoot.trayRowByScreen);
-            if (!r)
-                return "no-tray";
-            return r.openMenu(id) ? "opened" : "not-found";
-        }
-
-        function next(): string {
-            const r = qsRoot.panelForFocused(qsRoot.trayRowByScreen);
-            if (!r)
-                return "no-tray";
-            return r.openNextMenu() ? "opened" : "no-menu";
-        }
-
-        function list(): string {
-            const r = qsRoot.panelForFocused(qsRoot.trayRowByScreen);
-            return r ? r.listItems() : "[]";
-        }
-    }
-
-    IpcHandler {
-        target: "notify"
-
-        function toggle(): void {
-            notifCenter.togglePanel(qsRoot.focusedScreenName());
-        }
-        function close(): void {
-            notifCenter.closePanel();
-        }
-
-        function clear(): void {
-            notifCenter.clearAll();
-        }
-
-        function state(): string {
-            return JSON.stringify({
-                tracked: notifCenter.openCount,
-                maxTracked: notifCenter.maxTracked,
-                maxVisible: notifCenter.maxVisible,
-                history: notifCenter.history.length,
-                historyLimit: notifCenter.historyLimit,
-                unread: notifCenter.hasUnread,
-                dnd: notifCenter.dnd,
-                panel: notifCenter.panelOpen
-            });
-        }
-    }
-
-    IpcHandler {
-        target: "lock"
-
-        function lock(): void {
-            lockScreen.lockNow();
-        }
-        function toggle(): void {
-            lockScreen.lockNow();
-        }
-    }
-
-    IpcHandler {
-        target: "wallpaper"
-
-        function reload(): void {
-            WallpaperMap.reload();
-        }
-        function status(): string {
-            return WallpaperMap.summary();
-        }
-    }
-
-    IpcHandler {
-        target: "palette"
-
-        function state(): string {
-            return JSON.stringify({
-                palette: Style.paletteName,
-                accent: String(Style.accent),
-                themeAccent: String(Style.themeAccent),
-                themeName: Style.gtkThemeName
-            });
-        }
-        function next(): string {
-            qsRoot.cyclePalette();
-            return Style.paletteName;
-        }
-        function set(name: string): string {
-            qsRoot.setPaletteName(String(name));
-            return Style.paletteName;
-        }
-
-        function colors(): string {
-            return Style.paletteReport();
-        }
-
-        function scan(): string {
-            return Style.paletteScanReport();
-        }
-    }
-
     function btToggle(how) {
         const want = !Style.btOn;
         const via = Style.btSetEnabled(want);
-        console.log("[BT] " + how + " toggle bt → " + (want ? "on" : "off") + "(via " + via + ")");
+        if (Style.debug)
+            console.log("[BT] " + how + " toggle bt → " + (want ? "on" : "off") + "(via " + via + ")");
         return JSON.stringify({
             enabled: want,
             via: via
         });
-    }
-    IpcHandler {
-        target: "bt"
-
-        function state(): string {
-            return Style.btState();
-        }
-
-        function toggle(): string {
-            return qsRoot.btToggle("ipc");
-        }
     }
 
     function audioToggleMute(how) {
         const sink = Pipewire.defaultAudioSink;
         const audio = (sink && sink.audio) ? sink.audio : null;
         if (!audio) {
-            console.log("[VOL] " + how + " toggle mute: no default output yet, no-op");
+            if (Style.debug)
+                console.log("[VOL] " + how + " toggle mute: no default output yet, no-op");
             return JSON.stringify({
                 muted: null
             });
         }
         audio.muted = !audio.muted;
-        console.log("[VOL] " + how + " toggle mute → " + (audio.muted ? "muted" : "unmuted"));
+        if (Style.debug)
+            console.log("[VOL] " + how + " toggle mute → " + (audio.muted ? "muted" : "unmuted"));
         return JSON.stringify({
             muted: audio.muted
         });
@@ -883,7 +1010,8 @@ ShellRoot {
         const sink = Pipewire.defaultAudioSink;
         const audio = (sink && sink.audio) ? sink.audio : null;
         if (!audio) {
-            console.log("[VOL] " + how + " step: no default output yet, no-op");
+            if (Style.debug)
+                console.log("[VOL] " + how + " step: no default output yet, no-op");
             return;
         }
         const cur = Number(audio.volume) || 0;
@@ -894,116 +1022,27 @@ ShellRoot {
         if (v === cur)
             return;
         audio.volume = v;
-        console.log("[VOL] " + how + " " + (step > 0 ? "+" : "") + step + "% → " + Math.round(v * 100) + "%");
-    }
-    IpcHandler {
-        target: "audio"
-
-        function state(): string {
-            const sink = Pipewire.defaultAudioSink;
-            const audio = (sink && sink.audio) ? sink.audio : null;
-            return JSON.stringify({
-                sink: sink ? String(sink.name) : null,
-                volume: audio ? Math.round(audio.volume * 100) : null,
-                muted: audio ? audio.muted : null
-            });
-        }
-
-        function mute(): string {
-            return qsRoot.audioToggleMute("ipc");
-        }
-    }
-    IpcHandler {
-        target: "debug"
-
-        function on(): string {
-            Style.debug = true;
-            Compositor.debug = true;
-            return JSON.stringify({
-                debug: true,
-                compositor: true
-            });
-        }
-        function off(): string {
-            Style.debug = false;
-            Compositor.debug = false;
-            return JSON.stringify({
-                debug: false,
-                compositor: false
-            });
-        }
-        function state(): string {
-            return JSON.stringify({
-                debug: Style.debug,
-                compositor: Compositor.debug
-            });
-        }
-    }
-    IpcHandler {
-        target: "brightness"
-
-        function state(): string {
-            return qsRoot.brightnessIpcState();
-        }
-
-        function set(p: int): string {
-            const m = qsRoot.panelForFocused(qsRoot.brightnessByScreen);
-            if (m)
-                m.setPct(p, "ipc");
-            return qsRoot.brightnessIpcState();
-        }
-        function step(d: int): string {
-            const m = qsRoot.panelForFocused(qsRoot.brightnessByScreen);
-            if (m)
-                m.stepPct(d, "ipc");
-            return qsRoot.brightnessIpcState();
-        }
-
-        function preview(on: int): string {
-            const m = qsRoot.panelForFocused(qsRoot.brightnessByScreen);
-            if (m) {
-                m.preview = on !== 0;
-                if (m.preview && m.pct < 0)
-                    m.pct = 42;
-                console.log("[BRIGHT] preview " + (m.preview ? "on" : "off"));
-            }
-            return qsRoot.brightnessIpcState();
-        }
+        if (Style.debug)
+            console.log("[VOL] " + how + " " + (step > 0 ? "+" : "") + step + "% → " + Math.round(v * 100) + "%");
     }
 
     function netToggle(how) {
         const r = Style.netToggleLink();
-        console.log("[NET] " + how + " net disconnect/reconnect(fallback) → " + r);
+        if (Style.debug)
+            console.log("[NET] " + how + " net disconnect/reconnect(fallback) → " + r);
         return r;
     }
     function netToggleWifi(how) {
         const r = Style.netToggleWifiLink();
-        console.log("[NET] " + how + " wifi cell → " + r);
+        if (Style.debug)
+            console.log("[NET] " + how + " wifi cell → " + r);
         return r;
     }
     function netToggleWired(how) {
         const r = Style.netToggleWiredLink();
-        console.log("[NET] " + how + " wired cell → " + r);
+        if (Style.debug)
+            console.log("[NET] " + how + " wired cell → " + r);
         return r;
-    }
-    IpcHandler {
-        target: "net"
-
-        function state(): string {
-            return Style.netState();
-        }
-
-        function toggle(): string {
-            return qsRoot.netToggle("ipc");
-        }
-
-        function wifi(): string {
-            return qsRoot.netToggleWifi("ipc");
-        }
-
-        function wired(): string {
-            return qsRoot.netToggleWired("ipc");
-        }
     }
 
     function rebootNotice(kernelN, modulesN, libsN, detail) {
@@ -1102,13 +1141,7 @@ ShellRoot {
 
     function rebootActionRoute(identifier) {
         if (identifier === "reboot") {
-            const inst = Object.values(qsRoot.powerMenuByScreen)[0];
-            if (inst) {
-                inst.run("systemctl reboot");
-                return true;
-            }
-
-            Quickshell.execDetached(["systemctl", "reboot"]);
+            powerFlow.run("systemctl reboot");
             return true;
         }
         if (identifier === "relogin") {
@@ -1122,13 +1155,7 @@ ShellRoot {
         const op = identifier === "reboot-force" ? "reboot" : identifier === "poweroff-force" ? "poweroff" : "";
         if (op === "")
             return false;
-        const inst = Object.values(qsRoot.powerMenuByScreen)[0];
-        if (inst) {
-            inst.requestGracefulForce(op);
-            return true;
-        }
-
-        Quickshell.execDetached(["bash", "-c", op === "reboot" ? "systemctl reboot" : "systemctl poweroff"]);
+        powerFlow.requestGracefulForce(op);
         return true;
     }
 
@@ -1144,75 +1171,6 @@ ShellRoot {
 
     function notificationActionRoute(identifier) {
         return qsRoot.rebootActionRoute(identifier) || qsRoot.forceActionRoute(identifier) || qsRoot.pomodoroActionRoute(identifier);
-    }
-
-    IpcHandler {
-        target: "reboot"
-
-        function state(): string {
-            return JSON.stringify({
-                needs: rebootNeeded.needs,
-                needsReboot: rebootNeeded.needsReboot,
-                needsRelogin: rebootNeeded.needsRelogin,
-                count: rebootNeeded.count,
-                kernel: rebootNeeded.newerKernel.length,
-                modules: rebootNeeded.newerModules.length,
-                libs: rebootNeeded.staleLibs.length,
-                running: rebootNeeded.running,
-                btime: rebootNeeded.btime,
-                seenKernel: rebootNeeded.seenKernel,
-                seenModules: rebootNeeded.seenModules,
-                compositorPid: rebootNeeded.compositorPid,
-                reason: rebootNeeded.reason,
-                detailKernel: rebootNeeded.detailKernel,
-                detailModules: rebootNeeded.detailModules,
-                detailLibs: rebootNeeded.detailLibs,
-                intervalMs: rebootNeeded.intervalMs
-            });
-        }
-
-        function check(): string {
-            rebootNeeded.kick();
-            return "recheck triggered (sh async), see reboot state in 1s";
-        }
-
-        function notify(): string {
-            qsRoot.notifyReboot("ipc");
-            return JSON.stringify({
-                needs: rebootNeeded.needs,
-                count: rebootNeeded.count
-            });
-        }
-
-        function preview(kernel: int, modules: int, libs: int): string {
-            const detail = {
-                kernel: kernel > 0 ? ["vmlinuz", "Image"] : [],
-                modules: modules > 0 ? ["nvidia", "vboxdrv", "zfs"] : [],
-                libs: libs > 0 ? ["libnvidia-glcore.so", "libnvidia-eglcore.so", "libc.so"] : []
-            };
-            return JSON.stringify(Object.assign(qsRoot.rebootNotice(kernel, modules, libs, detail), {
-                action: qsRoot.rebootAction(kernel, modules)
-            }));
-        }
-
-        function previewCurrent(): string {
-            return JSON.stringify(Object.assign(qsRoot.rebootNotice(rebootNeeded.newerKernel.length, rebootNeeded.newerModules.length, rebootNeeded.staleLibs.length, rebootNeeded.noticeDetail), {
-                action: qsRoot.rebootAction(rebootNeeded.newerKernel.length, rebootNeeded.newerModules.length)
-            }));
-        }
-    }
-
-    IpcHandler {
-        target: "polkit"
-
-        function state(): string {
-            return qsRoot.polkitState();
-        }
-
-        function cancel(): void {
-            if (polkitAgent.flow)
-                polkitAgent.flow.cancelAuthenticationRequest();
-        }
     }
 
     LockScreen {
@@ -1255,9 +1213,29 @@ ShellRoot {
         enabled: qsRoot.showWeather
     }
 
+    ThemeAuto {
+        qsRoot: qsRoot
+        weather: weather
+    }
+
     RebootNeeded {
         id: rebootNeeded
         enabled: qsRoot.showReboot
+    }
+
+    IpcPanels {
+        qsRoot: qsRoot
+        notifCenter: notifCenter
+    }
+    IpcSystem {
+        qsRoot: qsRoot
+        lockScreen: lockScreen
+        polkitAgent: polkitAgent
+        rebootNeeded: rebootNeeded
+    }
+    IpcDiag {
+        qsRoot: qsRoot
+        screenPanels: screenPanels
     }
 
     Variants {
@@ -1272,8 +1250,8 @@ ShellRoot {
 
             readonly property alias panelRef: panel
             readonly property alias weatherModuleRef: weatherModule
+            readonly property alias wallpaperModuleRef: wallpaperModule
             readonly property alias clockModuleRef: clockModule
-            readonly property alias calendarPopupRef: calendarPopup
             readonly property alias brightnessModuleRef: brightnessModule
             readonly property alias brightnessPopupRef: brightnessPopup
             readonly property alias wifiModuleRef: wifiModule
@@ -1281,29 +1259,15 @@ ShellRoot {
 
             Component.onCompleted: {
                 screenRoot.screenKey = modelData ? String(modelData.name) : "";
-                qsRoot.launcherByScreen[screenRoot.screenKey] = appLauncher;
-                qsRoot.clipsByScreen[screenRoot.screenKey] = clipPicker;
-                qsRoot.powerMenuByScreen[screenRoot.screenKey] = powerMenu;
-                qsRoot.brightnessByScreen[screenRoot.screenKey] = brightnessModule;
-                qsRoot.pomodoroByScreen[screenRoot.screenKey] = pomodoroModuleRef;
-                qsRoot.promptByScreen[screenRoot.screenKey] = polkitPrompt;
-                qsRoot.settingsByScreen[screenRoot.screenKey] = settingsPanel;
-                qsRoot.calendarByScreen[screenRoot.screenKey] = calendarPopup;
-                qsRoot.weatherPopupByScreen[screenRoot.screenKey] = weatherPopup;
-                qsRoot.trayRowByScreen[screenRoot.screenKey] = trayModule.trayRowItem;
+
+                screenPanels.register(screenRoot.screenKey, {
+                    brightness: brightnessModule,
+                    pomodoro: pomodoroModuleRef,
+                    prompt: polkitPrompt,
+                    tray: trayModule.trayRowItem
+                });
             }
-            Component.onDestruction: {
-                delete qsRoot.launcherByScreen[screenRoot.screenKey];
-                delete qsRoot.clipsByScreen[screenRoot.screenKey];
-                delete qsRoot.powerMenuByScreen[screenRoot.screenKey];
-                delete qsRoot.promptByScreen[screenRoot.screenKey];
-                delete qsRoot.settingsByScreen[screenRoot.screenKey];
-                delete qsRoot.calendarByScreen[screenRoot.screenKey];
-                delete qsRoot.weatherPopupByScreen[screenRoot.screenKey];
-                delete qsRoot.trayRowByScreen[screenRoot.screenKey];
-                delete qsRoot.brightnessByScreen[screenRoot.screenKey];
-                delete qsRoot.pomodoroByScreen[screenRoot.screenKey];
-            }
+            Component.onDestruction: screenPanels.unregister(screenRoot.screenKey)
 
             PanelWindow {
                 id: panel
@@ -1318,6 +1282,8 @@ ShellRoot {
                 anchors.right: true
 
                 exclusiveZone: Style.barHeight
+
+                WlrLayershell.layer: WlrLayer.Top
                 color: Style.bg
 
                 IdleInhibitor {
@@ -1343,7 +1309,8 @@ ShellRoot {
                         rad: 5
                         marginRight: 0
                         glyphYOffset: 2
-                        onClicked: appLauncher.visible ? appLauncher.close() : appLauncher.open()
+
+                        onClicked: launcherToggle()
                     }
 
                     Item {
@@ -1507,7 +1474,10 @@ ShellRoot {
                         onClicked: {
                             if (qsRoot.launcherEmptyWs)
                                 Compositor.prepareEmptyWorkspaceForLaunch();
-                            Style.probePanelApp([Style.terminal]);
+                            else
+                                Compositor.clearPendingWsSwitch();
+
+                            Style.probePanelApp([Style.terminal], Compositor.takePendingWsSwitch());
                         }
                     }
 
@@ -1522,8 +1492,11 @@ ShellRoot {
                         onClicked: {
                             if (qsRoot.launcherEmptyWs)
                                 Compositor.prepareEmptyWorkspaceForLaunch();
+                            else
+                                Compositor.clearPendingWsSwitch();
+                            const pre = Compositor.takePendingWsSwitch();
 
-                            Quickshell.execDetached(["env", "QS_NOBROWSER=" + I18n.t("hint.noBrowser"), "QS_LAUNCHER=" + Style.configDir + "/scripts/launch-desktop.sh", "bash", "-c", "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then \"$QS_LAUNCHER\" \"$id\" && exit 0; fi; " + "xdg-open about:blank 2>/dev/null && exit 0; " + "exec gdbus call --session --dest org.freedesktop.Notifications " + "--object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOBROWSER\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
+                            Quickshell.execDetached(["env", "QS_NOBROWSER=" + I18n.t("hint.noBrowser"), "QS_LAUNCHER=" + Style.configDir + "/scripts/launch-desktop.sh", "bash", "-c", (pre !== "" ? pre + "; " : "") + "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then \"$QS_LAUNCHER\" \"$id\" && exit 0; fi; " + "xdg-open about:blank 2>/dev/null && exit 0; " + "exec gdbus call --session --dest org.freedesktop.Notifications " + "--object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOBROWSER\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
                         }
                     }
 
@@ -1540,7 +1513,10 @@ ShellRoot {
                         onClicked: {
                             if (qsRoot.launcherEmptyWs)
                                 Compositor.prepareEmptyWorkspaceForLaunch();
-                            Quickshell.execDetached(["env", "QS_NOFM=" + I18n.t("hint.noFileManager"), "bash", "-c", "xdg-open \"$HOME\" 2>/dev/null || exec gdbus call --session " + "--dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOFM\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
+                            else
+                                Compositor.clearPendingWsSwitch();
+                            const pre = Compositor.takePendingWsSwitch();
+                            Quickshell.execDetached(["env", "QS_NOFM=" + I18n.t("hint.noFileManager"), "bash", "-c", (pre !== "" ? pre + "; " : "") + "xdg-open \"$HOME\" 2>/dev/null || exec gdbus call --session " + "--dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOFM\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
                         }
                     }
                 }
@@ -1669,10 +1645,14 @@ ShellRoot {
                         Poller {
                             active: qsRoot.showDisk
                             interval: 30000
+
+                            timeoutMs: 10000
                             command: ["sh", "-c", "df -P / | tail -1"]
                             onOutput: text => {
                                 const parts = String(text).trim().split(/\s+/);
-                                diskModule.pct = parseInt(parts[4]) || 0;
+
+                                if (parts.length >= 5 && isFinite(parseInt(parts[4])))
+                                    diskModule.pct = parseInt(parts[4]) || 0;
                             }
                         }
 
@@ -1788,7 +1768,7 @@ ShellRoot {
 
                     BarButton {
                         id: weatherModule
-                        shown: qsRoot.showWeather && weather.ready
+                        shown: qsRoot.showWeather
                         bgColor: "transparent"
                         rad: 5
                         padH: 3
@@ -1800,11 +1780,11 @@ ShellRoot {
 
                         opacityVal: weather.stale ? 0.45 : 1.0
 
-                        glyph: weather.current ? weather.glyph(weather.current.code, weather.current.isDay) : ""
+                        glyph: weather.current ? weather.glyph(weather.current.code, weather.current.isDay) : "\u{F013}"
                         tailText: weather.current ? Math.round(weather.current.temp) + "°" : ""
                         tailSize: 14
                         tailGap: 2
-                        onClicked: weatherPopup.toggle()
+                        onClicked: qsRoot.panelToggle("weather")
                     }
 
                     WifiModule {
@@ -1930,7 +1910,7 @@ ShellRoot {
 
                         marginRight: 1
 
-                        onClicked: notifCenter.togglePanel(screenRoot.modelData.name)
+                        onClicked: notifCenter.togglePanel(screenRoot.screenKey)
                         onRightClicked: notifCenter.toggleDnd()
                     }
 
@@ -1946,13 +1926,24 @@ ShellRoot {
                     }
 
                     BarButton {
+                        id: wallpaperModule
+                        shown: qsRoot.showWallpaper
+                        glyph: "\u{F0E09}"
+                        glyphSize: 18
+                        padH: 2
+                        marginRight: 2
+                        glyphYOffset: 1
+                        onClicked: qsRoot.panelToggle("wallpaper")
+                    }
+
+                    BarButton {
                         shown: qsRoot.showClips
                         glyph: "\u{F0147}"
                         glyphSize: 18
                         padH: 2
                         marginRight: 2
                         glyphYOffset: 1
-                        onClicked: clipPicker.visible ? clipPicker.close() : clipPicker.open()
+                        onClicked: clipsToggle()
                     }
 
                     BarButton {
@@ -1976,7 +1967,7 @@ ShellRoot {
                         padH: 2
                         marginRight: 3
                         glyphYOffset: 1
-                        onClicked: settingsPanel.toggle()
+                        onClicked: qsRoot.panelToggle("settings")
                     }
 
                     Module {
@@ -2064,7 +2055,7 @@ ShellRoot {
                         glyphYOffset: 1
                         opacityVal: 0.8
 
-                        onClicked: powerMenu.open()
+                        onClicked: qsRoot.panelSet("powermenu", true)
                     }
 
                     KeyboardModule {
@@ -2121,48 +2112,91 @@ ShellRoot {
                     ClockModule {
                         id: clockModule
                         qsRoot: rootRef
-                        calendarPopup: calendarPopupRef
                     }
                 }
             }
 
-            CalendarPopup {
-                id: calendarPopup
-                qsRoot: rootRef
-                panel: panelRef
-                clockModule: clockModuleRef
+            Loader {
+                active: screenPanels.calendarByScreen[screenRoot.screenKey] === true
+                onLoaded: item.open()
+                sourceComponent: CalendarPopup {
+                    qsRoot: rootRef
+                    panel: panelRef
+                    clockModule: clockModuleRef
+                    onVisibleChanged: if (!visible)
+                        screenPanels.setActive("calendar", screenRoot.screenKey, false)
+                }
             }
 
-            WeatherPopup {
-                id: weatherPopup
-                qsRoot: rootRef
-                panel: panelRef
-                weather: weatherRef
-                weatherModule: weatherModuleRef
+            Loader {
+                active: screenPanels.weatherPopupByScreen[screenRoot.screenKey] === true
+                onLoaded: item.open()
+                sourceComponent: WeatherPopup {
+                    qsRoot: rootRef
+                    panel: panelRef
+                    weather: weatherRef
+                    weatherModule: weatherModuleRef
+                    onVisibleChanged: if (!visible)
+                        screenPanels.setActive("weather", screenRoot.screenKey, false)
+                }
             }
 
-            AppLauncher {
-                id: appLauncher
-                bar: panel
-                emptyWs: qsRoot.launcherEmptyWs
+            Loader {
+                active: screenPanels.wallpaperPopupByScreen[screenRoot.screenKey] === true
+                onLoaded: item.open()
+                sourceComponent: WallpaperPopup {
+                    qsRoot: rootRef
+                    panel: panelRef
+                    wallpaperModule: wallpaperModuleRef
+                    onVisibleChanged: if (!visible)
+                        screenPanels.setActive("wallpaper", screenRoot.screenKey, false)
+                }
             }
 
-            PowerMenu {
-                id: powerMenu
-                bar: panel
+            Loader {
+                active: screenPanels.launcherByScreen[screenRoot.screenKey] === true
+
+                onLoaded: item.open()
+                sourceComponent: AppLauncher {
+                    bar: panel
+                    emptyWs: qsRoot.launcherEmptyWs
+                    onVisibleChanged: if (!visible)
+                        screenPanels.setActive("launcher", screenRoot.screenKey, false)
+                }
             }
 
-            ClipPicker {
-                id: clipPicker
-                bar: panel
-                qsRoot: rootRef
+            Loader {
+                active: screenPanels.powerMenuByScreen[screenRoot.screenKey] === true
+                onLoaded: item.open()
+                sourceComponent: PowerMenu {
+                    flow: powerFlow
+                    bar: panel
+                    onVisibleChanged: if (!visible)
+                        screenPanels.setActive("powermenu", screenRoot.screenKey, false)
+                }
             }
 
-            SettingsPanel {
-                id: settingsPanel
-                bar: panel
-                qsRoot: rootRef
-                notifCenter: notifCenterRef
+            Loader {
+                active: screenPanels.clipsByScreen[screenRoot.screenKey] === true
+                onLoaded: item.open()
+                sourceComponent: ClipPicker {
+                    bar: panel
+                    qsRoot: rootRef
+                    onVisibleChanged: if (!visible)
+                        screenPanels.setActive("clips", screenRoot.screenKey, false)
+                }
+            }
+
+            Loader {
+                active: screenPanels.settingsByScreen[screenRoot.screenKey] === true
+                onLoaded: item.open()
+                sourceComponent: SettingsPanel {
+                    bar: panel
+                    qsRoot: rootRef
+                    notifCenter: notifCenterRef
+                    onVisibleChanged: if (!visible)
+                        screenPanels.setActive("settings", screenRoot.screenKey, false)
+                }
             }
 
             PolkitPrompt {

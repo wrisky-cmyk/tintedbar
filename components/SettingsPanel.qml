@@ -30,9 +30,9 @@ OverlayPanel {
         flick.contentY = 0;
         card.forceActiveFocus();
     }
+
     function close() {
         visible = false;
-        card.clearSel();
     }
     function toggle() {
         visible ? close() : open();
@@ -303,12 +303,6 @@ OverlayPanel {
                         valueText: I18n.langName
                         activate: () => qsRoot.cycleLang()
                     }
-
-                    ChoiceRow {
-                        labelText: I18n.t("panel.palette")
-                        valueText: I18n.t("palette." + Style.paletteName)
-                        activate: () => qsRoot.cyclePalette()
-                    }
                     StepperRow {
                         labelText: I18n.t("panel.barHeight")
                         value: Style.barHeight
@@ -316,6 +310,18 @@ OverlayPanel {
                         step: 2
                         minValue: 24
                         maxValue: 48
+                    }
+
+                    ChoiceRow {
+                        labelText: I18n.t("panel.palette")
+                        valueText: I18n.t("palette." + Style.paletteName)
+                        activate: () => qsRoot.cyclePalette()
+                    }
+
+                    ToggleRow {
+                        labelText: I18n.t("flag.autoTheme")
+                        value: qsRoot.autoTheme
+                        toggleFn: () => qsRoot.setBarFlag("autoTheme", !qsRoot.autoTheme)
                     }
 
                     Repeater {
@@ -425,16 +431,6 @@ OverlayPanel {
                     }
                 }
             }
-        }
-
-        Rectangle {
-            visible: flick.contentHeight > flick.height
-            width: 3
-            height: Math.max(12, flick.visibleArea.heightRatio * flick.height)
-            x: flick.x + flick.width - width - 2
-            y: flick.y + flick.visibleArea.yPosition * flick.height
-            radius: 1.5
-            color: Style.border
         }
     }
 }

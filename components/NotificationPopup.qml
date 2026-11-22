@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell.Services.Notifications
 import Quickshell.Widgets
@@ -84,40 +85,14 @@ Item {
         border.width: 2
         border.color: Style.notifBorder(card.urgency)
 
-        FileIcon {
-            id: iconFile
-            visible: false
-            iconNames: {
-                if (!card.note)
-                    return [];
-                const names = [];
-                if (card.note.image)
-                    names.push(card.note.image);
-                if (card.note.appIcon)
-                    names.push(card.note.appIcon);
-                if (card.note.desktopEntry)
-                    names.push(card.note.desktopEntry);
-                return names;
-            }
-        }
+        NotificationIcon {
+            note: card.note
+            iconSize: card.iconSize
+            fallbackPx: 10
 
-        IconImage {
-            id: iconImg
+            showFallback: card.hasIcon
             x: card.pad
             y: card.pad + (card.contentHeight - card.iconSize) / 2
-            width: card.iconSize
-            height: card.iconSize
-            visible: card.hasIcon && source !== "" && status !== Image.Error
-            source: iconFile.source
-        }
-
-        Text {
-            anchors.centerIn: iconImg
-            visible: card.hasIcon && (!iconImg.visible)
-            text: "●"
-            color: Style.text3
-            font.family: Style.cjk
-            font.pixelSize: 10
         }
 
         Column {

@@ -55,13 +55,15 @@ printf 'auth include login\n' | sudo tee /etc/pam.d/quickshell-lock
   因此目录可以随意放置。电池、温度、LED、网卡探测不到时，对应模块整块隐藏。
 - `weather.conf` 和 `wallpapers.conf` 随包附带，而且**不改也能运行**：壁纸默认纯色，天气坐标留空时
   模块隐藏（需要时填写 `lat=` / `lon=`）。换机器通常只需调整[可手改的配置文件](reference.md#可手改的配置文件)
-  中两处与本机绑定的内容：壁纸输出名（用 `hyprctl monitors` 查看）和天气经纬度。
+  中两处与本机绑定的内容：壁纸输出名（用 `hyprctl monitors` 查看，或开着壁纸模块在弹窗里直接看 ——
+  每屏一行已经把输出名列出来了）和天气经纬度（天气面板里搜城市选点即可，不必手填）。
   字体通常无需修改：Nerd Font 会自动从已安装字体中选择，中文交给系统回退；只有想更换
   首选字体时才修改 `Style.qml` 顶部的字体名。
 - 多屏：每屏一份栏和面板，点击作用于聚焦屏；壁纸按输出名分别配置。
 - **选 GTK 主题的建议**：想深浅切换全应用生效，选**出厂自带深色变体**的主题
   （`nwg-look` 列表里能配对深浅的：Adwaita、Breeze、Orchis、Catppuccin 等）——
   GTK3 老应用与走 GTK 主题的 Qt 应用读的是**主题文件的颜色**，不看深浅标准信号；
+  设置里的"自动深浅主题"（按日出日落自动切）同样吃这条建议；
   主题只有一份时它们不跟随（仅 libadwaita／浏览器／portal 应用跟随），不算故障。
   只有 Qt 主题的用户装 **breeze-gtk** 指过去即可，Qt/GTK/状态栏同一家族；
   完全不装 GTK 主题也能用（栏固定走内置默认深色档，应用层照切）。
@@ -126,6 +128,11 @@ components/                  Style（配色/字体） · Compositor（组合器�
                              拆出为独立文件） · 各组按钮
 scripts/                     icon-follow.sh · launch-desktop.sh · theme-apply.sh
                              theme-toggle.sh · theme-css.sh（把主题 CSS 解析成“名字=值”）
+                             reboot-check.sh（重启判据一次取数, 行协议见 RebootNeeded）
+                             icon-probe-lib.sh（图标探测前置库, 被 IconProbe 批处理 source）
+                             brightness-probe.sh / brightness-read.sh / brightness-write.sh
+                             （亮度三段传输: 探测/读/写, 数值计算在 QML 侧）
+                             atomic-write.sh（状态原子写: 目标路径=$1, 内容走 stdin）
 icons/                       电源菜单用的图片
 wallpapers.conf              壁纸映射：输出名=图片路径 或 输出名=#RRGGBB
 weather.conf                 天气坐标（留空 = 天气模块整体隐藏）

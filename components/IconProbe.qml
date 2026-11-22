@@ -127,7 +127,8 @@ Item {
             return;
         root._iconQueue = {};
         root._iconProbeBatchGen = root._iconProbeGen;
-        let s = root.iconProbeFunc();
+
+        let s = ". " + Style.sq(Style.configDir + "/scripts/icon-probe-lib.sh") + "\n";
         s += "probe() {\n";
         s += "  for n in \"$@\"; do\n";
         s += "    try_name \"$n\" && return 0\n";
@@ -227,53 +228,5 @@ Item {
         iconProbeWatchdog.stop();
         root._iconProbePending = [];
         root.iconProbesFinished();
-    }
-
-    function iconProbeFunc() {
-        let s = "";
-        s += "t=\"$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null";
-
-        s += " | sed -n \"s/^'//;s/'$//p\")\"\n";
-        s += "[ -n \"$t\" ] || t=\"$(sed -n 's/^gtk-icon-theme-name=//p'";
-        s += " \"$HOME/.config/gtk-3.0/settings.ini\" 2>/dev/null)\"\n";
-        s += "[ -n \"$t\" ] || t=hicolor\n";
-
-        s += "CHAIN=\"\"\n";
-        s += "for base in \"$HOME/.local/share/icons\" /usr/share/icons; do\n";
-        s += "  [ -f \"$base/$t/index.theme\" ] && CHAIN=\"$CHAIN";
-        s += " $(sed -n 's/^Inherits=//p' \"$base/$t/index.theme\" | tr ',' ' ')\"\n";
-        s += "done\n";
-        s += "try_name() {\n";
-        s += "  n=\"$1\"\n";
-
-        s += "  for th in \"$t\" $CHAIN hicolor Adwaita default; do\n";
-        s += "    for base in \"$HOME/.local/share/icons\" /usr/share/icons; do\n";
-        s += "      [ -d \"$base/$th\" ] || continue\n";
-        s += "      # 不写死尺寸: 直接扫所有尺寸目录(含 512x512、@2x 等)\n";
-        s += "      for c in apps actions status devices places categories mimetypes panel; do\n";
-        s += "        for f in \"$base/$th\"/*/\"$c\"/\"$n\".svg";
-        s += " \"$base/$th\"/*/\"$c\"/\"$n\".png; do\n";
-        s += "          [ -f \"$f\" ] && { printf '%s\\n' \"$f\"; exit 0; }\n";
-        s += "        done\n";
-        s += "      done\n";
-        s += "      for c in apps actions status devices places categories emblems; do\n";
-        s += "        for f in \"$base/$th\"/*/symbolic/\"$c\"/\"$n\".svg";
-        s += " \"$base/$th\"/*/symbolic/\"$c\"/\"$n\".png; do\n";
-        s += "          [ -f \"$f\" ] && { printf '%s\\n' \"$f\"; exit 0; }\n";
-        s += "        done\n";
-        s += "      done\n";
-        s += "      for c in apps actions status devices places categories emblems mimetypes; do\n";
-        s += "        f=\"$base/$th/symbolic/$c/$n.svg\"\n";
-        s += "        [ -f \"$f\" ] && { printf '%s\\n' \"$f\"; exit 0; }\n";
-        s += "      done\n";
-        s += "    done\n";
-        s += "  done\n";
-        s += "  for p in /usr/share/pixmaps/$n.svg /usr/share/pixmaps/$n.png";
-        s += " /usr/share/pixmaps/$n.xpm; do\n";
-        s += "    [ -f \"$p\" ] && { printf '%s\\n' \"$p\"; exit 0; }\n";
-        s += "  done\n";
-        s += "  return 1\n";
-        s += "}\n";
-        return s;
     }
 }

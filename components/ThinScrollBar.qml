@@ -18,8 +18,8 @@ Item {
         color: Style.text3
         opacity: 0.45
 
-        height: Math.max(24, sb.height * target.height / Math.max(1, target.contentHeight))
-        y: sb.maxScroll > 0 ? (target.contentY / sb.maxScroll) * (sb.height - height) : 0
+        height: Math.max(24, sb.height * sb.target.height / Math.max(1, sb.target.contentHeight))
+        y: sb.maxScroll > 0 ? (sb.target.contentY / sb.maxScroll) * (sb.height - height) : 0
     }
 
     MouseArea {
@@ -37,7 +37,7 @@ Item {
             const half = thumb.height / 2;
             const track = Math.max(1, sb.height - thumb.height);
             const ty = Math.max(0, Math.min(track, y - half));
-            target.contentY = ty / track * sb.maxScroll;
+            sb.target.contentY = ty / track * sb.maxScroll;
         }
     }
 }

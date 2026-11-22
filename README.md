@@ -10,10 +10,11 @@
 
 TintedBar 是基于 QML（[quickshell](https://quickshell.org)）的 Wayland 桌面外壳，用一个进程替代
 waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitagent：
-栏、面板（启动器 / 剪贴板 / 电源 / 通知 / 日历 / 天气 / 设置）、锁屏和壁纸都在其中，
+栏、面板（启动器 / 剪贴板 / 电源 / 通知 / 日历 / 天气 / 壁纸 / 设置）、锁屏和壁纸都在其中，
 没有常驻 Python/Node，除天气外不联网。
 
-- 目标环境：Hyprland 或 niri（带 layer-shell + IPC 的 wlroots / smithay 系合成器）。
+- 目标环境：Hyprland（**Lua 配置**）、niri、sway（带 layer-shell + IPC 的
+  wlroots / smithay 系合成器）。
 - 面板一律走 IPC，**不占用任何键位**；按键由合成器绑定。
 - ⚠️ **修改 `.qml` 后保存即热重载。锁屏期间或授权弹窗挂着时不要保存**：重载会重建窗口
   （屏幕黑一下），正在进行的授权也会被取消。
@@ -22,7 +23,7 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 
 - 窗口标题与关闭按钮位于栏中央，把栏当作窗口的一部分，鼠标操作更顺手。
 - 面向小屏：一窗一工作区，工作区按钮显示该区窗口的真实图标。
-- 功能够用而不臃肿：复杂功能不做，日常只需填天气坐标、写壁纸映射。
+- 功能够用而不臃肿：复杂功能不做，日常只需填天气坐标、点壁纸图标换壁纸（也可手写映射）。
 
 ## 依赖
 
@@ -31,7 +32,7 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 | 依赖 | 用途 |
 | --- | --- |
 | quickshell 0.3.x、Qt 6.12 | 运行时 |
-| Hyprland 或 niri（`hyprctl` / `niri msg`） | 工作区、标题、焦点、DPMS |
+| Hyprland ≥0.57 / niri / sway（`hyprctl` / `niri msg` / `swaymsg`） | 工作区、标题、焦点、DPMS |
 | D-Bus 会话总线 + NetworkManager / UPower / BlueZ / PipeWire / 通知服务 | 网络、电池、蓝牙、音量、通知；缺失时对应模块留空，不会崩溃 |
 | `sh` + coreutils（`grep`/`sed`/`find`/`df`） | 读取 `/proc`、`/sys`，调用命令行工具 |
 | 字体 **JetBrainsMono Nerd Font（v3+）** + **Noto Sans CJK SC** | 图标字形与中文。首选缺失会输出 `[FONT]` WARN；Nerd Font 会自动从已安装家族中选择替代品，中文交给系统字体回退。**Nerd Font 需 v3 及以上**：亮度/天气/蓝牙关等图标使用 v3 重映射码位，v2 字体名能对上但图标会错位或变成豆腐。找不到可用 Nerd Font 时仍需手动安装或修改 `Style.qml` 首选名 |
@@ -61,11 +62,14 @@ waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock + hyprpolkitage
 3. **排错时前台运行**：`quickshell --no-color`，报错会直接输出到终端；不想占用终端可加 `-d`。
 
 ```sh
-# Hyprland（hyprland.conf）
-exec-once = quickshell
+# Hyprland（Lua 配置）
+hl.exec_cmd("quickshell")
 
 # niri（config.kdl）
 spawn-at-startup "quickshell"
+
+# sway（~/.config/sway/config）
+exec quickshell
 ```
 
 修改 `.qml` 后保存即可热重载，无需重启。日志位于
@@ -86,6 +90,7 @@ qs ipc call weather toggle            # 天气
 qs ipc call notify toggle             # 通知历史
 qs ipc call lock toggle               # 上锁
 qs ipc call wallpaper reload          # 重读壁纸映射
+qs ipc call wallpaper toggle          # 壁纸编辑弹窗
 qs ipc call bt toggle                 # 切换蓝牙电源
 qs ipc call audio mute                # 切换默认输出静音
 qs ipc call net toggle                # 断开/接回当前链路（有线优先）
@@ -108,6 +113,7 @@ qs ipc call brightness set <0-100>    # 亮度（也支持 step <±N>）
 | 麦克风（占用时显示） | 弹出输入音量滑条 | 切换麦克风静音（图标变带斜杠并压暗） |
 | 亮度 | 弹出亮度滑条 | — |
 | 深浅 / 温度等 | 切换系统深浅色 / 在终端打开 `top` | — |
+| 壁纸（需开启） | 编辑弹窗：每屏一行，填图片路径或纯色，铺满/适配/平铺，“重置”删行 | — |
 | 空闲抑制 | 切换“现在是否抑制” | 立即上锁 |
 | 齿轮 / 重启提示 | 设置面板 / 查看重启原因 | — / 立即重新检查 |
 
@@ -115,7 +121,7 @@ qs ipc call brightness set <0-100>    # 亮度（也支持 step <±N>）
 
 ## 配置
 
-- `weather.conf`：天气坐标 `lat=` / `lon=`；留空则天气模块隐藏。
+- `weather.conf`：天气位置 `lat=` / `lon=`（可选 `city=` 显示城市名）。留空时栏上天气图标显示 ⚙，点开面板即可搜索地名配置，平时无需手改。
 - `wallpapers.conf`：每行 `输出名=图片路径` 或 `输出名=#RRGGBB`；图片可放在任意目录，
   写绝对路径或 `~` 开头的路径，`*` 为兜底。
 - `components/Style.qml`：字体名、栏高默认值和面板圆角等；颜色默认跟随当前 GTK 主题。

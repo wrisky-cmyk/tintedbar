@@ -1,15 +1,16 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 
-PopupWindow {
+PopupPanel {
     id: calendarPopup
 
     required property var qsRoot
-    required property var panel
+
+    anchorItem: clockModule
     required property var clockModule
 
     visible: false
-    color: "transparent"
 
     function open() {
         const now = new Date();
@@ -43,7 +44,6 @@ PopupWindow {
     implicitWidth: 350
 
     implicitHeight: calCol.implicitHeight + 20 + Style.barHeight + 2 - Style.barInset
-    grabFocus: true
 
     property int viewYear: new Date().getFullYear()
     property int viewMonth: new Date().getMonth()
@@ -62,11 +62,6 @@ PopupWindow {
     readonly property real cellW: (calendarPopup.width - 20) / 7
 
     readonly property int gridRows: Math.ceil((calendarPopup.firstOffset() + calendarPopup.daysInMonth()) / 7)
-
-    anchor.window: panel
-    anchor.item: clockModule
-    anchor.edges: Edges.Bottom
-    anchor.gravity: Edges.Top
 
     function firstOffset() {
         const d = new Date(calendarPopup.viewYear, calendarPopup.viewMonth, 1);
@@ -104,7 +99,7 @@ PopupWindow {
         id: calRect
         anchors.fill: parent
 
-        anchors.topMargin: Style.barHeight + 2 - Style.barInset
+        anchors.topMargin: calendarPopup.cardTopMargin
         radius: 12
         color: Style.card
         border.width: 1
@@ -136,6 +131,7 @@ PopupWindow {
 
                     MouseArea {
                         anchors.fill: parent
+                        anchors.margins: -6
                         cursorShape: Qt.PointingHandCursor
                         onClicked: calendarPopup.shiftMonth(-1)
                     }
@@ -161,6 +157,7 @@ PopupWindow {
 
                     MouseArea {
                         anchors.fill: parent
+                        anchors.margins: -6
                         cursorShape: Qt.PointingHandCursor
                         onClicked: calendarPopup.shiftMonth(1)
                     }
@@ -175,6 +172,8 @@ PopupWindow {
 
                     model: I18n.weekdayHeaders
                     delegate: Text {
+
+                        required property var modelData
                         width: calendarPopup.cellW
                         height: 24
                         horizontalAlignment: Text.AlignHCenter
@@ -197,11 +196,13 @@ PopupWindow {
                     model: calendarPopup.visible ? calendarPopup.gridRows * 7 : 0
 
                     delegate: Item {
+                        id: cell
+                        required property int index
                         width: calendarPopup.cellW
                         height: 48
-                        readonly property int dayNum: calendarPopup.cellDay(index)
+                        readonly property int dayNum: calendarPopup.cellDay(cell.index)
 
-                        readonly property var mark: calendarPopup.showLunar ? I18n.dayMark(calendarPopup.cellDate(index)) : {
+                        readonly property var mark: calendarPopup.showLunar ? I18n.dayMark(calendarPopup.cellDate(cell.index)) : {
                             text: "",
                             kind: ""
                         }
@@ -225,7 +226,7 @@ PopupWindow {
                             anchors.topMargin: 4
                             text: parent.dayNum || ""
                             visible: parent.dayNum !== 0
-                            color: calendarPopup.isToday(parent.dayNum) ? Style.accent : (calendarPopup.isWeekend(index) ? Style.text3 : Style.text2)
+                            color: calendarPopup.isToday(parent.dayNum) ? Style.accent : (calendarPopup.isWeekend(cell.index) ? Style.text3 : Style.text2)
                             font.family: Style.cjk
                             font.pixelSize: 16
                             font.weight: calendarPopup.isToday(parent.dayNum) ? Font.Bold : Font.Normal

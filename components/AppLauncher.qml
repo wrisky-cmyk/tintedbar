@@ -49,7 +49,22 @@ OverlayPanel {
             console.log("[LAUNCH] emptyWs=", emptyWs, "key=", key);
         if (emptyWs)
             Compositor.prepareEmptyWorkspaceForLaunch();
+        else
+            Compositor.clearPendingWsSwitch();
+        doLaunch(key);
+    }
 
+    function doLaunch(key) {
+        const pre = Compositor.takePendingWsSwitch();
+        if (pre !== "") {
+            if (Style.debug)
+                console.log("[LAUNCH] doLaunch(+) ", pre, key);
+            Quickshell.execDetached(["bash", "-c", pre + "; exec " + Style.sq(Style.configDir + "/scripts/launch-desktop.sh") + " " + Style.sq(key)]);
+            launcher.close();
+            return;
+        }
+        if (Style.debug)
+            console.log("[LAUNCH] doLaunch", key);
         Style.launchDesktop(key);
         launcher.close();
     }

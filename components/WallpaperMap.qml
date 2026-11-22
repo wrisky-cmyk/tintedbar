@@ -10,7 +10,7 @@ Item {
 
     property var entries: Object.create(null)
 
-    readonly property string home: Quickshell.env("HOME") || ""
+    readonly property string home: Style.home
 
     readonly property string confPath: Style.configDir + "/wallpapers.conf"
 

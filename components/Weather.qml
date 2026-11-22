@@ -9,13 +9,15 @@ Item {
     readonly property string home: Quickshell.env("HOME") || Quickshell.env("TMPDIR") || "/tmp"
 
     readonly property string confPath: Style.configDir + "/weather.conf"
-    readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (wx.home + "/.local/state")) + "/quickshell"
+    readonly property string stateDir: Style.stateDir
     readonly property string cachePath: wx.stateDir + "/weather.json"
 
     property bool enabled: false
 
     property real lat: 0
     property real lon: 0
+
+    property string city: ""
 
     readonly property bool located: wx.lat !== 0 && wx.lon !== 0
 
@@ -33,6 +35,17 @@ Item {
     readonly property bool ready: wx.enabled && wx.located && wx.ok
 
     readonly property bool refreshing: weatherPoller.running
+
+    property string wxState: "idle"
+    function setState(s) {
+        if (wx.wxState === s)
+            return;
+        if (wx.wxState === "retry-wait")
+            retryTimer.stop();
+        if (wx.wxState === "wake-wait")
+            wakeDelay.stop();
+        wx.wxState = s;
+    }
 
     function refresh() {
         if (!wx.enabled || !wx.located)
@@ -95,7 +108,10 @@ Item {
         interval: wx.refreshMs
 
         command: wx.fetchCommand()
-        onStarted: wx._requestUrl = wx.url
+        onStarted: {
+            wx._requestUrl = wx.url;
+            wx.setState("fetching");
+        }
 
         onActiveChanged: {
             if (active && running && wx._requestUrl !== wx.url)
@@ -107,12 +123,17 @@ Item {
     property int retryStep: 0
     readonly property var retryDelays: [60 * 1000, 300 * 1000]
     function scheduleRetry() {
-        if (!wx.enabled || !wx.located)
+        if (!wx.enabled || !wx.located) {
+            wx.setState("idle");
             return;
-        if (wx.retryStep >= wx.retryDelays.length)
+        }
+        if (wx.retryStep >= wx.retryDelays.length) {
+            wx.setState("idle");
             return;
+        }
         retryTimer.interval = wx.retryDelays[wx.retryStep++];
         retryTimer.restart();
+        wx.setState("retry-wait");
     }
     Timer {
         id: retryTimer
@@ -122,28 +143,21 @@ Item {
     }
 
     onEnabledChanged: if (!wx.enabled) {
-        retryTimer.stop();
-        wakeDelay.stop();
+        wx.setState("idle");
         wx.retryStep = 0;
-
-        wx.wakeKilled = false;
         wx.useResolve = false;
         wx.fallbackIp = "";
         wx.fallbackKickPending = false;
     }
     onLocatedChanged: if (!wx.located) {
-        retryTimer.stop();
-        wakeDelay.stop();
+        wx.setState("idle");
         wx.retryStep = 0;
-        wx.wakeKilled = false;
         wx.useResolve = false;
         wx.fallbackIp = "";
         wx.fallbackKickPending = false;
     }
 
     property double lastTickMs: 0
-
-    property bool wakeKilled: false
     Timer {
         interval: 5000
         repeat: true
@@ -160,15 +174,17 @@ Item {
             if (gap < 15000)
                 return;
             wx.retryStep = 0;
-            retryTimer.stop();
-            if (!wx.enabled || !wx.located)
+            wx.setState("wake-wait");
+            if (!wx.enabled || !wx.located) {
+                wx.setState("idle");
                 return;
+            }
+
             console.log("[WX] wake: gap " + Math.round(gap / 1000) + "s, refetch in 3s");
             weatherPoller.stop();
 
             wx._requestUrl = "";
 
-            wx.wakeKilled = true;
             wakeDelay.restart();
         }
     }
@@ -178,16 +194,17 @@ Item {
         repeat: false
 
         onTriggered: {
-            wx.wakeKilled = false;
-            if (!wx.enabled || !wx.located)
+            if (!wx.enabled || !wx.located) {
+                wx.setState("idle");
                 return;
+            }
             weatherPoller.kickAfterExit();
         }
     }
 
     function absorb(text) {
         if (wx._requestUrl !== wx.url) {
-            if (!wx.wakeKilled && wx.enabled && wx.located)
+            if (wx.wxState !== "wake-wait" && wx.enabled && wx.located)
                 weatherPoller.kickAfterExit();
             return;
         }
@@ -224,7 +241,7 @@ Item {
         wx.fallbackIp = "";
         wx.fallbackKickPending = false;
         wx.retryStep = 0;
-        retryTimer.stop();
+        wx.setState("idle");
         wx.fetchedAt = Date.now();
         wx.cacheSave(obj);
     }
@@ -284,28 +301,21 @@ Item {
     }
 
     function cacheSave(payload) {
-        if (cacheWrite.running) {
-            wx.cachePending = payload;
-            return;
-        }
-        cacheWrite.command = ["sh", "-c", Style.atomicWriteCmd(wx.cachePath, JSON.stringify({
-                at: Date.now(),
-                data: payload
-            }))];
-        cacheWrite.running = true;
+        wx.cachePending = payload;
+        cacheStore.requestSave();
     }
     property var cachePending: null
 
-    Process {
-        id: cacheWrite
-        running: false
-        onExited: {
-            if (wx.cachePending === null)
-                return;
-            const p = wx.cachePending;
-            wx.cachePending = null;
-            wx.cacheSave(p);
-        }
+    JsonStore {
+        id: cacheStore
+        path: wx.cachePath
+        loadOnStart: false
+        loaded: true
+        debounceMs: 0
+        serialize: () => JSON.stringify({
+                at: Date.now(),
+                data: wx.cachePending
+            })
     }
 
     Process {
@@ -339,6 +349,7 @@ Item {
         const oldLat = wx.lat;
         const oldLon = wx.lon;
         let la = 0, lo = 0;
+        let cityVal = "";
         for (const raw of String(text === undefined ? "" : text).split("\n")) {
             if (/^\s*#/.test(raw))
                 continue;
@@ -348,6 +359,11 @@ Item {
                 continue;
             const key = line.slice(0, eq).trim().toLowerCase();
             let val = line.slice(eq + 1).trim();
+
+            if (key === "city") {
+                cityVal = val;
+                continue;
+            }
             const ci = val.search(/\s#/);
             if (ci >= 0)
                 val = val.slice(0, ci).trim();
@@ -361,6 +377,7 @@ Item {
         }
         wx.lat = la;
         wx.lon = lo;
+        wx.city = cityVal;
 
         if (la !== oldLat || lo !== oldLon) {
             wx.stale = true;

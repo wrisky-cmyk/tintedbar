@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Window
 import Quickshell.Services.Notifications
@@ -351,42 +352,13 @@ Item {
                                 color: index === panel.selIndex ? Style.hover : "transparent"
                             }
 
-                            FileIcon {
-                                id: rowIconFile
-                                visible: false
-                                iconNames: {
-                                    const e = row.modelData;
-                                    const names = [];
-                                    if (e.image)
-                                        names.push(e.image);
-                                    if (e.appIcon)
-                                        names.push(e.appIcon);
-                                    if (e.desktopEntry)
-                                        names.push(e.desktopEntry);
-                                    return names;
-                                }
-                            }
-
-                            IconImage {
-                                id: rowIcon
+                            NotificationIcon {
+                                note: row.modelData
                                 x: 8
                                 y: 8
-                                width: 22
-                                height: 22
-                                visible: row.hasIcon && source !== "" && status !== Image.Error
-                                source: rowIconFile.source
                             }
 
                             readonly property bool hasIcon: !!(row.modelData && ((row.modelData.appIcon && row.modelData.appIcon !== "") || (row.modelData.image && row.modelData.image !== "") || (row.modelData.desktopEntry && row.modelData.desktopEntry !== "")))
-
-                            Text {
-                                anchors.centerIn: rowIcon
-                                visible: row.hasIcon && !rowIcon.visible
-                                text: "●"
-                                color: Style.text3
-                                font.family: Style.cjk
-                                font.pixelSize: 9
-                            }
 
                             Text {
                                 id: rowTime

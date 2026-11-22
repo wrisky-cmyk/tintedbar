@@ -4,7 +4,6 @@ Module {
     id: clockModule
 
     required property var qsRoot
-    required property var calendarPopup
 
     bgColor: "transparent"
     radius: 4
@@ -22,10 +21,7 @@ Module {
     property bool alt: false
 
     property int clockTick: 0
-    property string clockStr: {
-        clockTick;
-        return Style.timeStr(qsRoot.showClockSeconds, qsRoot.clock24);
-    }
+    property string clockStr: clockTick >= 0 ? Style.timeStr(qsRoot.showClockSeconds, qsRoot.clock24) : ""
 
     readonly property var altParts: clockModule.alt ? (function () {
             const tick = clockModule.clockStr;
@@ -118,6 +114,6 @@ Module {
         }
     }
 
-    onClicked: calendarPopup.toggle()
+    onClicked: qsRoot.panelToggle("calendar")
     onRightClicked: clockModule.alt = !clockModule.alt
 }

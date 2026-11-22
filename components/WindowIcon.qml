@@ -132,7 +132,7 @@ Item {
     }
 
     Connections {
-        target: (Style.compositor !== "niri" && winIcon.toplevel !== null && winIcon.toplevel !== undefined && typeof winIcon.toplevel === "object") ? winIcon.toplevel : null
+        target: (Style.compositor !== "niri" && Style.compositor !== "sway" && winIcon.toplevel !== null && winIcon.toplevel !== undefined && typeof winIcon.toplevel === "object") ? winIcon.toplevel : null
         function onWaylandHandleChanged() {
             winIcon.updateClass();
         }
@@ -146,7 +146,7 @@ Item {
     }
 
     Connections {
-        target: (Style.compositor !== "niri" && winIcon.toplevel !== null && winIcon.toplevel !== undefined && typeof winIcon.toplevel === "object" && winIcon.toplevel.wayland !== null && winIcon.toplevel.wayland !== undefined && typeof winIcon.toplevel.wayland === "object") ? winIcon.toplevel.wayland : null
+        target: (Style.compositor !== "niri" && Style.compositor !== "sway" && winIcon.toplevel !== null && winIcon.toplevel !== undefined && typeof winIcon.toplevel === "object" && winIcon.toplevel.wayland !== null && winIcon.toplevel.wayland !== undefined && typeof winIcon.toplevel.wayland === "object") ? winIcon.toplevel.wayland : null
         function onAppIdChanged() {
             winIcon.updateClass();
         }
@@ -159,7 +159,7 @@ Item {
         onTriggered: {
             winIcon.retries++;
 
-            if (winIcon.retries % 2 === 1 && Style.compositor !== "niri") {
+            if (winIcon.retries % 2 === 1 && Style.compositor !== "niri" && Style.compositor !== "sway") {
                 Compositor.requestToplevelResync("missing-class");
             }
             winIcon.updateClass();

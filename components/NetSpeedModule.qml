@@ -46,7 +46,7 @@ Module {
     }
 
     function isTunnelIface(name) {
-        return /^(tun|tap|wg|tailscale|zt|ppp|ipsec|nordlynx)/.test(String(name));
+        return Style.isTunnelIface(name);
     }
 
     function refreshSpeed(text) {
@@ -100,7 +100,7 @@ Module {
         running: true
         triggeredOnStart: true
         onTriggered: {
-            if (!qsRoot.showNetSpeed)
+            if (!netSpeedModule.qsRoot.showNetSpeed)
                 return;
 
             if (netSpeedModule.wifi === null && netSpeedModule.wired === null)

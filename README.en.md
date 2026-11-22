@@ -11,10 +11,12 @@
 TintedBar is a Wayland desktop shell built with QML ([quickshell](https://quickshell.org)).
 It replaces waybar + mako + wofi + wlogout + hyprpaper + hypridle + hyprlock +
 hyprpolkitagent with a single process: the bar, panels (launcher / clipboard / power /
-notifications / calendar / weather / settings), lock screen, and wallpaper all live there.
+notifications / calendar / weather / wallpaper / settings), lock screen, and wallpaper
+all live there.
 There is no persistent Python/Node process, and it uses the network only for weather.
 
-- Targets Hyprland or niri (wlroots / smithay compositors with layer-shell + IPC).
+- Targets Hyprland (**≥0.57, Lua config**), niri, or sway (wlroots / smithay
+  compositors with layer-shell + IPC).
 - Panels are driven entirely through IPC and do not claim any keybindings; bind keys in your compositor.
 - ⚠️ **Saving a `.qml` file hot-reloads the configuration. Do not save while the screen is locked or a
   polkit prompt is open**: reloading recreates windows (the screen goes black for a moment), and an
@@ -24,8 +26,8 @@ There is no persistent Python/Node process, and it uses the network only for wea
 
 - Window title and close button sit in the center of the bar, treating the bar as part of the window.
 - Designed for small screens: one window per workspace, with real window icons on workspace buttons.
-- Useful without bloat: complex features are out of scope; day-to-day setup is weather coordinates
-  and wallpaper mappings.
+- Useful without bloat: complex features are out of scope; day-to-day setup is weather
+  coordinates and switching wallpapers from the bar icon (hand-written mappings still work).
 
 ## Requirements
 
@@ -34,7 +36,7 @@ There is no persistent Python/Node process, and it uses the network only for wea
 | Dependency | Purpose |
 | --- | --- |
 | quickshell 0.3.x, Qt 6.12 | Runtime |
-| Hyprland or niri (`hyprctl` / `niri msg`) | Workspaces, titles, focus, DPMS |
+| Hyprland ≥0.57 / niri / sway (`hyprctl` / `niri msg` / `swaymsg`) | Workspaces, titles, focus, DPMS |
 | D-Bus session bus + NetworkManager / UPower / BlueZ / PipeWire / notification service | Network, battery, Bluetooth, volume, notifications; missing services leave the corresponding module empty without crashing |
 | `sh` + coreutils (`grep`/`sed`/`find`/`df`) | Read `/proc`, `/sys`, and invoke CLI tools |
 | Fonts **JetBrainsMono Nerd Font (v3+)** + **Noto Sans CJK SC** | Icon glyphs and Chinese. A missing preferred font emits a `[FONT]` warning; Nerd Font automatically selects another installed family, while Chinese uses the system font fallback. **Nerd Font v3 or newer is required**: brightness/weather/bluetooth-off glyphs use v3-remapped codepoints and break on v2 even when the family name matches. If no usable Nerd Font is installed, install one or change the preferred name in `Style.qml` |
@@ -66,11 +68,14 @@ notifications are sent by TintedBar itself.
 3. **Debug in the foreground**: `quickshell --no-color`; add `-d` to detach it from the terminal.
 
 ```sh
-# Hyprland (hyprland.conf)
-exec-once = quickshell
+# Hyprland (Lua config)
+hl.exec_cmd("quickshell")
 
 # niri (config.kdl)
 spawn-at-startup "quickshell"
+
+# sway (~/.config/sway/config)
+exec quickshell
 ```
 
 Changes to `.qml` files hot-reload on save; no restart is needed. The log is at
@@ -93,6 +98,7 @@ qs ipc call weather toggle            # weather
 qs ipc call notify toggle             # notification history
 qs ipc call lock toggle               # lock screen
 qs ipc call wallpaper reload          # reload wallpaper mappings
+qs ipc call wallpaper toggle          # wallpaper editor popup
 qs ipc call bt toggle                 # toggle Bluetooth power
 qs ipc call audio mute                # mute/unmute the default output
 qs ipc call net toggle                # disconnect/reconnect the current link (wired first)
@@ -116,6 +122,7 @@ network control (currently in Chinese).
 | Microphone (shown while in use) | Open the input-volume slider | Toggle mic mute (icon turns crossed-out and dims) |
 | Brightness | Open the brightness slider | — |
 | Light/dark / temperature etc. | Toggle system light/dark mode / open `top` in a terminal | — |
+| Wallpaper (enable first) | Editor popup: one row per screen, fill path or solid color, fill/fit/tile, “Reset” removes the row | — |
 | Idle inhibitor | Toggle “inhibit now” | Lock immediately |
 | Gear / reboot prompt | Settings panel / show reboot reasons | — / re-check immediately |
 
@@ -124,7 +131,7 @@ network, privacy indicators, and the reboot prompt (currently in Chinese).
 
 ## Configuration
 
-- `weather.conf`: weather coordinates as `lat=` / `lon=`; leave empty to hide the weather module.
+- `weather.conf`: weather location as `lat=` / `lon=` (optional `city=` shown as the city name). When empty the bar shows a ⚙ weather icon — open the panel to search a city; no manual editing needed.
 - `wallpapers.conf`: one `output=image-path` or `output=#RRGGBB` per line. Images may live anywhere;
   use an absolute path or one starting with `~`. `*` is the fallback.
 - `components/Style.qml`: font names, default bar height, panel corner radii, etc. Colors follow the

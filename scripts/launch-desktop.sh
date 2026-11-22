@@ -62,14 +62,21 @@ if [ "$empty_ws" = 1 ] && command -v jq >/dev/null 2>&1; then
             out=$(niri msg -j focused-output 2>/dev/null | jq -r '.name // empty' 2>/dev/null)
             occids=",$(niri msg -j windows 2>/dev/null | jq -r '
                 [.[].workspace_id] | join(",")' 2>/dev/null),"
+
+            curid=$(printf '%s' "$wss" | jq -r '
+                [.[] | select(.is_focused) | .id][0] // empty' 2>/dev/null)
+            has_win=0
+            case ",$occids," in *",$curid,"*) has_win=1 ;; esac
             empty=""
-            for pair in $(printf '%s' "$wss" | jq -r --arg out "$out" '
-                .[] | select(.output == $out) | select(.idx >= 1 and .idx <= 20) |
-                "\(.idx),\(.id)"' 2>/dev/null | sort -n); do
-                idx=${pair%%,*}; nid=${pair##*,}
-                [ "$idx" = "$cur" ] && continue
-                case ",$occids," in *",$nid,"*) ;; *) empty=$idx; break ;; esac
-            done
+            if [ "$has_win" = 1 ]; then
+                for pair in $(printf '%s' "$wss" | jq -r --arg out "$out" '
+                    .[] | select(.output == $out) | select(.idx >= 1 and .idx <= 20) |
+                    "\(.idx),\(.id)"' 2>/dev/null | sort -n); do
+                    idx=${pair%%,*}; nid=${pair##*,}
+                    [ "$idx" = "$cur" ] && continue
+                    case ",$occids," in *",$nid,"*) ;; *) empty=$idx; break ;; esac
+                done
+            fi
             if [ -n "$empty" ]; then
                 niri msg action focus-workspace "$empty" >/dev/null 2>&1 || true
             fi
@@ -93,6 +100,29 @@ if [ "$empty_ws" = 1 ] && command -v jq >/dev/null 2>&1; then
             fi
             if [ -n "$empty" ]; then
                 hyprctl dispatch 'hl.dsp.focus({ workspace = "'"$empty"'" })' >/dev/null 2>&1 || true
+            fi
+        elif [ -n "${SWAYSOCK:-}" ]; then
+
+            foc=$(swaymsg -t get_workspaces 2>/dev/null | jq -r '
+                [.[] | select(.focused)][0] | "\(.num) \(.output)"' 2>/dev/null)
+            cur=${foc%% *}
+            mon=${foc##* }
+            occ=" $(swaymsg -t get_tree 2>/dev/null | jq -r --arg m "$mon" '
+                [.. | objects | select(.type? == "output" and .name? == $m)][0]
+                | .nodes[]
+                | select(.type? == "workspace" and .num >= 1 and .num <= 20)
+                | select((.nodes | length) > 0 or (.floating_nodes | length) > 0)
+                | .num] | join(" ")' 2>/dev/null) "
+            empty=""
+            case "$occ" in *" $cur "*) ;; *) empty="$cur" ;; esac
+            if [ -z "$empty" ]; then
+                for wid in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+                    [ "$wid" = "$cur" ] && continue
+                    case "$occ" in *" $wid "*) ;; *) empty="$wid"; break ;; esac
+                done
+            fi
+            if [ -n "$empty" ]; then
+                swaymsg workspace number "$empty" >/dev/null 2>&1 || true
             fi
         fi
     fi

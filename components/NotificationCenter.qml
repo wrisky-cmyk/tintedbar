@@ -46,156 +46,10 @@ Item {
 
     property var pendingReplay: []
 
-    readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Style.home + "/.local/state")) + "/quickshell"
+    readonly property string stateDir: Style.stateDir
 
     readonly property var server: notifServer
     readonly property int openCount: Style.modelValues(notifServer.trackedNotifications).length
-
-    onHistoryChanged: if (center.historyLoaded)
-        center.saveHistory()
-
-    property bool historySaveDirty: false
-    property int historySaveFailures: 0
-
-    function saveHistory() {
-        if (center.historyLoadCorrupt)
-            return;
-        historySaveDirty = true;
-        if (!historySaveDebounce.running)
-            historySaveDebounce.start();
-    }
-
-    Timer {
-        id: historySaveDebounce
-        interval: 200
-        repeat: true
-        onTriggered: {
-            if (!historySaveDirty) {
-                stop();
-                return;
-            }
-            if (historySave.running)
-                return;
-            historySaveDirty = false;
-
-            const d = Style.sq(center.stateDir);
-            historySave.command = ["sh", "-c", "umask 077; mkdir -p " + d + " && cat > " + d + "/notification-history.json.tmp && mv -f " + d + "/notification-history.json.tmp " + d + "/notification-history.json"];
-            historySave.stdinEnabled = true;
-            historySave.running = true;
-        }
-    }
-
-    Process {
-        id: historySave
-        running: false
-        stdinEnabled: true
-        onStarted: {
-            historySave.write(JSON.stringify(center.historyForSave()));
-            historySave.stdinEnabled = false;
-        }
-        onExited: exitCode => {
-            if (exitCode !== 0) {
-                historySaveFailures++;
-                console.warn("[NOTIFY] history save failed, exitCode " + exitCode + " (attempt " + historySaveFailures + ")");
-                if (historySaveFailures <= 3)
-                    historySaveRetry.restart();
-            } else {
-                historySaveFailures = 0;
-            }
-        }
-    }
-    Timer {
-        id: historySaveRetry
-        interval: 1000
-        repeat: false
-        onTriggered: if (!historySave.running)
-            center.saveHistory()
-    }
-
-    Process {
-        id: historyQuarantine
-        running: false
-        command: ["sh", "-c", "mv -f " + Style.sq(center.stateDir + "/notification-history.json") + " " + Style.sq(center.stateDir + "/notification-history.json.corrupt")]
-        onExited: code => {
-            if (code !== 0) {
-                console.warn("[NOTIFY] could not quarantine corrupt history, exit " + code);
-                return;
-            }
-            center.historyLoadCorrupt = false;
-
-            historyCorruptNotify.restart();
-            if (center.historyLoaded)
-                center.saveHistory();
-        }
-    }
-    Timer {
-        id: historyCorruptNotify
-        interval: 1500
-        repeat: false
-        onTriggered: Style.notifySimple(I18n.t("notif.historyCorrupt"), I18n.t("notif.historyCorruptBody"))
-    }
-
-    Process {
-        id: historyLoad
-        running: true
-        command: ["sh", "-c", Style.readJsonCmd(center.stateDir + "/notification-history.json", "[]")]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const gen = center.historyLoadGen;
-                let list = [];
-                let parseOk = true;
-                try {
-                    list = JSON.parse(text);
-                } catch (e) {
-                    parseOk = false;
-                }
-                if (!parseOk) {
-                    center.historyLoadCorrupt = true;
-                    console.warn("[NOTIFY] history JSON is corrupt; quarantining as .corrupt");
-                    historyQuarantine.running = true;
-                }
-                if (!parseOk)
-                    list = [];
-
-                if (!Array.isArray(list))
-                    list = [];
-
-                list = list.slice(0, 500);
-
-                if (center.historyLoadGen !== gen) {
-                    center.historyLoaded = true;
-
-                    center.pendingReplay = [];
-                    return;
-                }
-
-                const out = [];
-                for (const e of list) {
-                    if (!e || e.id === undefined)
-                        continue;
-                    const copy = Object.assign({}, e, {
-                        id: 1000000 + out.length,
-                        open: false
-                    });
-                    if (Array.isArray(copy.members)) {
-                        copy.members = copy.members.map(function (m, k) {
-                            return (m && typeof m === "object") ? Object.assign({}, m, {
-                                id: 2000000 + out.length * 100 + k
-                            }) : m;
-                        });
-                    }
-                    out.push(copy);
-                }
-
-                center.history = center.history.concat(out);
-                center.historyLoaded = true;
-
-                for (const rn of center.pendingReplay)
-                    center.replayWriteback(rn);
-                center.pendingReplay = [];
-            }
-        }
-    }
 
     function toggleDnd() {
         center.dnd = !center.dnd;
@@ -227,6 +81,110 @@ Item {
             if (n)
                 n.dismiss();
         }
+    }
+
+    onHistoryChanged: if (center.historyLoaded)
+        center.saveHistory()
+
+    property bool historySaveDirty: false
+    property int historySaveFailures: 0
+
+    function saveHistory() {
+        if (center.historyLoadCorrupt)
+            return;
+        historyJsonStore.requestSave();
+    }
+
+    JsonStore {
+        id: historyJsonStore
+        path: center.stateDir + "/notification-history.json"
+        defaultText: "[]"
+        debounceMode: "tick"
+        retryLimit: 3
+        retryIntervalMs: 1000
+        serialize: () => JSON.stringify(center.historyForSave())
+        onTextLoaded: text => {
+            const gen = center.historyLoadGen;
+            let list = [];
+            let parseOk = true;
+
+            if (String(text).length > 5 * 1024 * 1024)
+                parseOk = false;
+            try {
+                if (parseOk)
+                    list = JSON.parse(text);
+            } catch (e) {
+                parseOk = false;
+            }
+            if (!parseOk) {
+                center.historyLoadCorrupt = true;
+                console.warn("[NOTIFY] history JSON is corrupt; quarantining as .corrupt");
+                historyQuarantine.running = true;
+            }
+            if (!parseOk)
+                list = [];
+
+            if (!Array.isArray(list))
+                list = [];
+
+            list = list.slice(0, 500);
+
+            if (center.historyLoadGen !== gen) {
+                center.historyLoaded = true;
+
+                center.pendingReplay = [];
+                return;
+            }
+
+            const out = [];
+            for (const e of list) {
+                if (!e || e.id === undefined)
+                    continue;
+                const copy = Object.assign({}, e, {
+                    id: 1000000 + out.length,
+                    open: false
+                });
+                if (Array.isArray(copy.members)) {
+                    copy.members = copy.members.map(function (m, k) {
+                        return (m && typeof m === "object") ? Object.assign({}, m, {
+                            id: 2000000 + out.length * 100 + k
+                        }) : m;
+                    });
+                }
+                out.push(copy);
+            }
+
+            center.history = center.history.concat(out);
+            center.historyLoaded = true;
+
+            for (const rn of center.pendingReplay)
+                center.replayWriteback(rn);
+            center.pendingReplay = [];
+        }
+        onSaveFailed: (code, failures) => console.warn("[NOTIFY] history save failed, exitCode " + code + " (attempt " + failures + ")")
+    }
+
+    Process {
+        id: historyQuarantine
+        running: false
+        command: ["sh", "-c", "mv -f " + Style.sq(center.stateDir + "/notification-history.json") + " " + Style.sq(center.stateDir + "/notification-history.json.corrupt")]
+        onExited: code => {
+            if (code !== 0) {
+                console.warn("[NOTIFY] could not quarantine corrupt history, exit " + code);
+                return;
+            }
+            center.historyLoadCorrupt = false;
+
+            historyCorruptNotify.restart();
+            if (center.historyLoaded)
+                center.saveHistory();
+        }
+    }
+    Timer {
+        id: historyCorruptNotify
+        interval: 1500
+        repeat: false
+        onTriggered: Style.notifySimple(I18n.t("notif.historyCorrupt"), I18n.t("notif.historyCorruptBody"))
     }
 
     function snapshot(n, isOpen) {
@@ -376,6 +334,13 @@ Item {
             center.history = center.history.slice(0, center.historyLimit);
     }
 
+    function clearAll() {
+        center.history = [];
+        center.hasUnread = false;
+        center.dismissAllOpen();
+        center.historyLoadGen++;
+    }
+
     function onArrive(n) {
         center.hasUnread = true;
         center.pushEntry(center.snapshot(n, !center.dnd));
@@ -496,13 +461,6 @@ Item {
         interval: 1500
         onTriggered: if (center.testEntry)
             center.activateEntry(center.testEntry)
-    }
-
-    function clearAll() {
-        center.history = [];
-        center.hasUnread = false;
-        center.dismissAllOpen();
-        center.historyLoadGen++;
     }
 
     NotificationServer {

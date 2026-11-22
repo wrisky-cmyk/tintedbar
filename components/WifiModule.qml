@@ -82,7 +82,7 @@ Module {
 
         Text {
             id: wifiNameText
-            visible: qsRoot.showNetIface && wifiModule.wifi !== null
+            visible: wifiModule.qsRoot.showNetIface && wifiModule.wifi !== null
             anchors.verticalCenter: parent.verticalCenter
             color: Style.text2
             font.family: Style.nerd

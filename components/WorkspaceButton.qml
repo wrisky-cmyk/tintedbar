@@ -30,11 +30,11 @@ Item {
         return a === b;
     }
 
-    readonly property bool niri: Compositor.name === "niri"
+    readonly property bool queryWs: Compositor.name !== "hyprland"
 
     property var ws: null
 
-    readonly property bool focused: wsBtn.niri ? Compositor.workspaceFocused(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? wsBtn.ws.focused : false)
+    readonly property bool focused: wsBtn.queryWs ? Compositor.workspaceFocused(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? wsBtn.ws.focused : false)
     readonly property bool hasWindows: iconModel.count > 0
 
     readonly property real contentOpacity: focused ? 1.0 : (hasWindows ? 0.75 : 0.3)
@@ -44,19 +44,19 @@ Item {
     }
 
     function refresh() {
-        if (!wsBtn.niri)
+        if (!wsBtn.queryWs)
             wsBtn.ws = Compositor.workspaceForId(wsBtn.wsId);
-        if (Style.debug && !wsBtn.niri && !wsBtn.ws) {
+        if (Style.debug && !wsBtn.queryWs && !wsBtn.ws) {
             console.log("[WSBTN]", wsBtn.wsId, "workspace 未找到; model=", Compositor.workspacesDump());
         }
         wsBtn.syncWindows();
-        if (Style.debug && !wsBtn.niri && wsBtn.ws) {
+        if (Style.debug && !wsBtn.queryWs && wsBtn.ws) {
             console.log("[WSBTN]", wsBtn.wsId, "found, toplevels=" + Compositor.modelValues(wsBtn.ws.toplevels).length);
         }
     }
 
     function syncWindows() {
-        const current = wsBtn.niri ? Compositor.windowsForWorkspace(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? Compositor.modelValues(wsBtn.ws.toplevels) : []);
+        const current = wsBtn.queryWs ? Compositor.windowsForWorkspace(wsBtn.wsId, wsBtn.outputName) : (wsBtn.ws ? Compositor.modelValues(wsBtn.ws.toplevels) : []);
 
         const same = (a, b) => sameToplevel(a, b);
         for (let i = iconModel.count - 1; i >= 0; i--) {
@@ -78,7 +78,7 @@ Item {
                 });
                 continue;
             }
-            if (!wsBtn.niri)
+            if (!wsBtn.queryWs)
                 continue;
 
             const old = iconModel.get(idx).toplevel;
@@ -195,7 +195,7 @@ Item {
         return "";
     }
     function activate() {
-        if (wsBtn.niri) {
+        if (wsBtn.queryWs) {
             Compositor.activateWorkspace(wsBtn.wsId, wsBtn.outputName);
             return;
         }
@@ -309,14 +309,14 @@ Item {
     }
 
     Connections {
-        target: wsBtn.niri ? Compositor : null
+        target: wsBtn.queryWs ? Compositor : null
         function onCompositorUpdated() {
             wsBtn.scheduleRefresh();
         }
     }
 
     Connections {
-        target: wsBtn.niri ? null : Compositor
+        target: wsBtn.queryWs ? null : Compositor
         function onRawEvent(event) {
             const name = (event && event.name !== undefined) ? String(event.name) : "";
             if (!wsBtn.refreshEvents[name])
@@ -326,21 +326,21 @@ Item {
     }
 
     Connections {
-        target: wsBtn.niri ? null : Compositor
+        target: wsBtn.queryWs ? null : Compositor
         function onFocusedWorkspaceChanged() {
             wsBtn.scheduleRefresh();
         }
     }
 
     Connections {
-        target: wsBtn.niri ? null : Compositor
+        target: wsBtn.queryWs ? null : Compositor
         function onValuesChanged() {
             wsBtn.scheduleRefresh();
         }
     }
 
     Connections {
-        target: (!wsBtn.niri && wsBtn.ws && wsBtn.ws.toplevels) ? wsBtn.ws.toplevels : null
+        target: (!wsBtn.queryWs && wsBtn.ws && wsBtn.ws.toplevels) ? wsBtn.ws.toplevels : null
         function onValuesChanged() {
             wsBtn.syncWindows();
         }

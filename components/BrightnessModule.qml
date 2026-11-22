@@ -47,15 +47,6 @@ Module {
         brightnessModule.setPct(brightnessModule.pct + d, how);
     }
 
-    function ddcArgs() {
-        const base = ["ddcutil"];
-        if (brightnessModule.ddcBus >= 0)
-            base.push("--bus", String(brightnessModule.ddcBus));
-
-        base.push("--sleep-multiplier", "0.2");
-        return base;
-    }
-
     function flushPending() {
         if (brightnessModule.pendingPct < 0 || brightnessModule.ddcBusy)
             return;
@@ -66,7 +57,8 @@ Module {
 
     function writePct(p, how) {
         if (brightnessModule.preview && brightnessModule.backend === "") {
-            console.log("[BRIGHT] preview mode, display only, no backend write");
+            if (Style.debug)
+                console.log("[BRIGHT] preview mode, display only, no backend write");
             return;
         }
         if (brightnessModule.backend === "sysfs") {
@@ -76,7 +68,7 @@ Module {
             }
 
             const v = Math.max(0, Math.round(brightnessModule.maxVal * p / 100));
-            brightnessWrite.command = ["bash", "-c", "busctl call org.freedesktop.login1 /org/freedesktop/login1/session/self " + "org.freedesktop.login1.Session SetBrightness ssu backlight " + brightnessModule.sysfsDev + " " + v];
+            brightnessWrite.command = ["bash", Style.configDir + "/scripts/brightness-write.sh", "logind", brightnessModule.sysfsDev, String(v)];
             brightnessWrite.running = true;
             writeWatchdog.restart();
             return;
@@ -89,7 +81,7 @@ Module {
             writeCooldownTimer.restart();
             return;
         }
-        brightnessWrite.command = brightnessModule.ddcArgs().concat(["setvcp", "10", String(p)]);
+        brightnessWrite.command = ["bash", Style.configDir + "/scripts/brightness-write.sh", "ddc", String(brightnessModule.ddcBus), String(p)];
         brightnessWrite.running = true;
         writeWatchdog.restart();
     }
@@ -144,9 +136,9 @@ Module {
         if (brightnessModule.backend === "" || brightnessModule.ddcBusy)
             return;
         if (brightnessModule.backend === "sysfs") {
-            brightnessRead.command = ["bash", "-c", "d=$(ls -d /sys/class/backlight/* | head -1); " + "echo \"${d##*/}\"; cat \"$d/brightness\" \"$d/max_brightness\""];
+            brightnessRead.command = ["bash", Style.configDir + "/scripts/brightness-read.sh", "sysfs"];
         } else {
-            brightnessRead.command = brightnessModule.ddcArgs().concat(["getvcp", "10", "--brief"]);
+            brightnessRead.command = ["bash", Style.configDir + "/scripts/brightness-read.sh", "ddc", String(brightnessModule.ddcBus)];
         }
         brightnessRead.running = true;
         readWatchdog.restart();
@@ -155,7 +147,7 @@ Module {
     Process {
         id: brightnessProbe
         running: true
-        command: ["bash", "-c", "for d in /sys/class/backlight/*; do [ -d \"$d\" ] && { echo sysfs; exit 0; }; done; " + "command -v ddcutil >/dev/null 2>&1 || exit 0; " + "if command -v timeout >/dev/null 2>&1; then ddc='timeout 8 ddcutil'; else ddc=ddcutil; fi; " + "bus=$($ddc detect 2>/dev/null | grep -m1 \"I2C bus\" | sed \"s/.*i2c-//\" | tr -d \"[:space:]\"); " + "[ -n \"$bus\" ] && echo \"ddc $bus\" || echo ddc"]
+        command: ["bash", Style.configDir + "/scripts/brightness-probe.sh"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const t = text.trim();
@@ -180,6 +172,16 @@ Module {
             } else {
                 brightnessModule.probeFailures = 0;
             }
+        }
+    }
+
+    Timer {
+        id: probeWatchdog
+        interval: 12000
+        running: brightnessProbe.running
+        onTriggered: if (brightnessProbe.running) {
+            console.log("[BRIGHT] probe timeout (12s), force kill");
+            brightnessProbe.running = false;
         }
     }
     property int probeFailures: 0

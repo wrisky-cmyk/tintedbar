@@ -119,26 +119,26 @@ OverlayPanel {
 
             StepperRow {
                 labelText: I18n.t("panel.pomodoroFocus")
-                value: qsRoot.pomodoroFocusMin
-                apply: v => qsRoot.setPomodoroFocusMin(v)
+                value: popup.qsRoot.pomodoroFocusMin
+                apply: v => popup.qsRoot.setPomodoroFocusMin(v)
                 step: 1
             }
             StepperRow {
                 labelText: I18n.t("panel.pomodoroBreak")
-                value: qsRoot.pomodoroBreakMin
-                apply: v => qsRoot.setPomodoroBreakMin(v)
+                value: popup.qsRoot.pomodoroBreakMin
+                apply: v => popup.qsRoot.setPomodoroBreakMin(v)
                 step: 1
             }
             StepperRow {
                 labelText: I18n.t("panel.pomodoroLong")
-                value: qsRoot.pomodoroLongMin
-                apply: v => qsRoot.setPomodoroLongMin(v)
+                value: popup.qsRoot.pomodoroLongMin
+                apply: v => popup.qsRoot.setPomodoroLongMin(v)
                 step: 5
             }
             StepperRow {
                 labelText: I18n.t("panel.pomodoroEvery")
-                value: qsRoot.pomodoroLongEvery
-                apply: v => qsRoot.setPomodoroLongEvery(v)
+                value: popup.qsRoot.pomodoroLongEvery
+                apply: v => popup.qsRoot.setPomodoroLongEvery(v)
                 step: 1
             }
 
@@ -165,10 +165,10 @@ OverlayPanel {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            qsRoot.setPomodoroFocusMin(25);
-                            qsRoot.setPomodoroBreakMin(5);
-                            qsRoot.setPomodoroLongMin(15);
-                            qsRoot.setPomodoroLongEvery(4);
+                            popup.qsRoot.setPomodoroFocusMin(25);
+                            popup.qsRoot.setPomodoroBreakMin(5);
+                            popup.qsRoot.setPomodoroLongMin(15);
+                            popup.qsRoot.setPomodoroLongEvery(4);
                         }
                     }
                 }

@@ -4,8 +4,6 @@ import QtQuick
 import QtQml
 import Quickshell
 import Quickshell.Io
-import Quickshell.Networking
-import Quickshell.Bluetooth
 import Quickshell.Services.Notifications
 import Quickshell.Services.UPower
 
@@ -150,7 +148,12 @@ Item {
         if (!last)
             return -1;
         const v = last[1].toLowerCase();
-        return (v === "1" || v === "true" || v === "yes" || v === "on") ? 1 : 0;
+        if (v === "1" || v === "true" || v === "yes" || v === "on")
+            return 1;
+        if (v === "0" || v === "false" || v === "no" || v === "off")
+            return 0;
+
+        return -1;
     }
 
     function syncDark() {
@@ -550,7 +553,7 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.11.18"
+    readonly property string version: "26.11.22"
     readonly property string minQuickshellVersion: "0.3.2"
     property string runningQuickshellVersion: ""
     property bool quickshellVersionChecked: false
@@ -643,6 +646,8 @@ Item {
 
     readonly property string home: Quickshell.env("HOME") || Quickshell.env("TMPDIR") || "/tmp"
 
+    readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (root.home + "/.local/state")) + "/quickshell"
+
     readonly property string configDir: Quickshell.shellDir
 
     function modelValues(model) {
@@ -690,7 +695,7 @@ Item {
         DesktopEntries.applicationsChanged.connect(() => {
             root.desktopEntryCache = Object.create(null);
         });
-        root.btSync();
+        BtState.btSync();
     }
 
     function appIconNames(cls) {
@@ -704,8 +709,14 @@ Item {
         if (out.indexOf(c) < 0)
             out.push(c);
         const app = root.appForClass(cls);
-        if (app && app.icon && out.indexOf(String(app.icon)) < 0)
-            out.push(String(app.icon));
+        if (app && app.icon) {
+            const ic = String(app.icon);
+            if (out.indexOf(ic) < 0)
+                out.push(ic);
+            const lic = ic.toLowerCase();
+            if (lic !== ic && out.indexOf(lic) < 0)
+                out.push(lic);
+        }
         return out;
     }
 
@@ -724,15 +735,6 @@ Item {
 
     function gvStr(v) {
         return "'" + String(v).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
-    }
-
-    function atomicWriteCmd(path, json) {
-        const p = String(path);
-        const slash = p.lastIndexOf("/");
-
-        const dir = slash < 0 ? "." : p.substring(0, slash);
-
-        return "umask 077; mkdir -p " + sq(dir) + " && " + "t=$(mktemp " + sq(path + ".XXXXXX") + ") || exit 1; " + "printf '%s' " + sq(json) + " > \"$t\" && mv -f \"$t\" " + sq(path) + " || { rm -f \"$t\"; exit 1; }";
     }
 
     function readJsonCmd(path, fallback) {
@@ -766,7 +768,6 @@ Item {
             "codium": "\u{F0A1E}",
             "com.xunlei.download": "\uF019",
             "tdxcfv": "\uF201",
-            "com.gitee.gmg137.neteasecloudmusicgtk4": "\u{F0F70}",
             "org.telegram.desktop": "\uF2C6",
             "wechat": "\uF1D7",
             "thunar": "\uEA83",
@@ -774,10 +775,8 @@ Item {
             "micro": "\uF044",
             "mpv": "\uF36E",
             "fcitx": "\uF11C",
-            "wpsoffice": "\u{F03C6}",
             "baidunetdisk": "\uEAC2",
             "binance": "\uF10F",
-            "clash-verge": "\u{F0582}",
             "localsend": "\u{F10DD}",
             "scrcpy": "\u{F04F7}",
             "blueman-manager": "\uF293",
@@ -790,151 +789,47 @@ Item {
     }
 
     function connectedWifi() {
-        for (const d of root.modelValues(Networking.devices)) {
-            if (!d || d.type !== DeviceType.Wifi || !d.connected)
-                continue;
-            for (const n of root.modelValues(d.networks)) {
-                if (n && n.connected)
-                    return n;
-            }
-        }
-        return null;
+        return NetState.connectedWifi();
     }
-
     function connectedWired() {
-        for (const d of root.modelValues(Networking.devices)) {
-            if (!d || d.type !== DeviceType.Wired)
-                continue;
-            if (d.connected)
-                return d;
-        }
-        return null;
+        return NetState.connectedWired();
     }
-
     function wiredDevice() {
-        for (const d of root.modelValues(Networking.devices)) {
-            if (!d || d.type !== DeviceType.Wired || !d.nmManaged)
-                continue;
-            return d;
-        }
-        return null;
+        return NetState.wiredDevice();
     }
-
-    function wiredNetwork() {
-        const d = root.wiredDevice();
-        if (!d)
-            return null;
-        if (d.network)
-            return d.network;
-        for (const n of root.modelValues(d.networks))
-            if (n)
-                return n;
-        return null;
-    }
-
     function wifiDevice() {
-        for (const d of root.modelValues(Networking.devices)) {
-            if (!d || d.type !== DeviceType.Wifi || !d.nmManaged)
-                continue;
-            return d;
-        }
-        return null;
+        return NetState.wifiDevice();
     }
-
+    function wiredNetwork() {
+        return NetState.wiredNetwork();
+    }
     function netToggleWifiLink() {
-        if (root.wifiDevice() === null)
-            return JSON.stringify({
-                acted: "nothing"
-            });
-        if (root.connectedWifi() !== null) {
-            Networking.wifiEnabled = false;
-            return JSON.stringify({
-                acted: "wifi-radio",
-                wifiEnabled: false,
-                wifiHardware: Networking.wifiHardwareEnabled
-            });
-        }
-        if (!Networking.wifiEnabled) {
-            Networking.wifiEnabled = true;
-            return JSON.stringify({
-                acted: "wifi-radio",
-                wifiEnabled: true,
-                wifiHardware: Networking.wifiHardwareEnabled
-            });
-        }
-        return JSON.stringify({
-            acted: "nothing"
-        });
+        return NetState.netToggleWifiLink();
     }
-
     function netToggleWiredLink() {
-        const w = root.wiredDevice();
-        if (w && w.connected) {
-            w.disconnect();
-            return JSON.stringify({
-                acted: "wired-off",
-                iface: String(w.name)
-            });
-        }
-
-        const n = root.wiredNetwork();
-        if (!n)
-            return JSON.stringify({
-                acted: "nothing"
-            });
-        n.connect();
-        return JSON.stringify({
-            acted: "wired-on",
-            iface: w ? String(w.name) : null,
-            net: String(n.name)
-        });
+        return NetState.netToggleWiredLink();
     }
-
     function netToggleLink() {
-        const w = root.wiredDevice();
-        if (w && w.connected)
-            return root.netToggleWiredLink();
-        const hasWifi = root.wifiDevice() !== null;
-        if (hasWifi && (root.connectedWifi() !== null || !Networking.wifiEnabled))
-            return root.netToggleWifiLink();
-        return JSON.stringify({
-            acted: "nothing"
-        });
+        return NetState.netToggleLink();
     }
-
     function netState() {
-        const w = root.connectedWifi();
-        const e = root.connectedWired();
-        const dev = root.wiredDevice();
-        const wifiDev = root.wifiDevice();
-        return JSON.stringify({
-            wifiEnabled: Networking.wifiEnabled,
-            wifiHardware: Networking.wifiHardwareEnabled,
-            wiredIface: dev ? String(dev.name) : null,
-            wifiIface: wifiDev ? String(wifiDev.name) : null,
-            wifi: w ? String(w.name) : null,
-            wired: e ? String(e.name) : null,
-            devices: root.modelValues(Networking.devices).map(d => d ? {
-                    name: String(d.name),
-                    type: DeviceType.toString(d.type),
-                    managed: d.nmManaged,
-                    connected: d.connected,
-                    nets: root.modelValues(d.networks).map(n => n ? String(n.name) : null),
-                    hasLink: d.hasLink,
-                    hasNetworks: d.networks !== undefined,
-                    isWiredEnum: d.type === DeviceType.Wired
-                } : null)
-        });
+        return NetState.netState();
+    }
+    function isTunnelIface(name) {
+        return NetState.isTunnelIface(name);
     }
 
-    function connectedBtDevice() {
-        const a = root.btAdapter();
-        if (!a)
-            return null;
-        for (const d of root.modelValues(a.devices))
-            if (d && d.connected)
-                return d;
-        return null;
+    function forceBranch(list, uid) {
+        if (list.length === 0)
+            return "plain";
+        return gracefulCandidates(list, uid).length > 0 ? "graceful" : "fallback";
+    }
+    function gracefulCandidates(list, uid) {
+        const pids = [];
+        for (const b of list)
+            if (b.pid > 0 && b.uid >= 0 && b.uid === uid)
+                pids.push(b.pid);
+        return pids;
     }
 
     function laptopBattery() {
@@ -945,211 +840,16 @@ Item {
         return null;
     }
 
-    property int btTick: 0
-    property bool btNotified: false
-    property bool btMissedLogged: false
-    property bool btProbeOn: false
-    property bool btProbeKnown: false
-    property bool btProbeLogged: false
-
-    property bool btWantOpen: false
-    property bool btWantOn: false
-    property int btWantMs: 3000
-
-    property int btRfkillFixes: 0
-    property string btRfkillWhy: ""
-
-    function btAdapter() {
-        const a = Bluetooth.defaultAdapter;
-        if (a)
-            return a;
-        for (const x of root.modelValues(Bluetooth.adapters))
-            if (x)
-                return x;
-        return null;
-    }
-
-    readonly property bool btCacheTrusted: {
-        const a = root.btAdapter();
-        return !!a && a.enabled && a.state === BluetoothAdapterState.Enabled;
-    }
-    readonly property string btCacheDesc: {
-        const a = root.btAdapter();
-        if (!a)
-            return "no adapter object";
-        return "enabled=" + a.enabled + " state=" + BluetoothAdapterState.toString(a.state);
-    }
-
-    readonly property bool btPresent: root.btAdapter() !== null || root.btProbeKnown
-
-    function bluetoothEnabled() {
-        if (root.btWantOpen)
-            return root.btWantOn;
-        return root.btCacheTrusted ? true : root.btProbeOn;
-    }
-
-    readonly property bool btOn: root.btTick >= 0 && root.bluetoothEnabled()
-
-    Timer {
-        interval: 5000
-        repeat: true
-        running: true
-        onTriggered: {
-            root.btTick++;
-            const now = root.bluetoothEnabled();
-            if (now !== root.btNotified) {
-                if (!root.btMissedLogged) {
-                    root.btMissedLogged = true;
-                    console.warn("[BT] icon state self-corrected: notification side thought " + root.btNotified + ", actual " + now + " —— backend missed change notification (§4.9); corrected to actual");
-                }
-                root.btNotified = now;
-            }
-        }
-    }
-
-    function btSync() {
-        root.btNotified = root.bluetoothEnabled();
-        root.btMissedLogged = false;
-    }
-    Connections {
-        target: Bluetooth
-        function onDefaultAdapterChanged() {
-            root.btSync();
-        }
-    }
-    Connections {
-        target: root.btAdapter()
-
-        function onEnabledChanged() {
-            root.btProbeLogged = false;
-            root.btSync();
-        }
-        function onStateChanged() {
-            root.btProbeLogged = false;
-            root.btSync();
-        }
-    }
-
-    Poller {
-        id: btPoller
-        active: !root.btCacheTrusted
-        timeoutMs: 8000
-
-        interval: (root.btAdapter() !== null || root.btProbeKnown) ? 15000 : 60000
-        command: ["busctl", "--system", "get-property", "org.bluez", root.btAdapter() ? String(root.btAdapter().dbusPath) : "/org/bluez/hci0", "org.bluez.Adapter1", "Powered"]
-        onOutput: text => {
-            const t = String(text).trim();
-
-            if (t.indexOf("b ") !== 0) {
-                if (!root.btProbeLogged) {
-                    root.btProbeLogged = true;
-                    console.warn("[BT] busctl probe returned no parseable value; keeping last state");
-                }
-                return;
-            }
-
-            const wantOpen = root.btWantOpen;
-            root.btProbeKnown = true;
-            root.btProbeOn = t.indexOf("true") >= 0;
-            root.btSync();
-
-            if (wantOpen && root.btProbeOn === root.btWantOn)
-                root.btWantOpen = false;
-
-            if (root.btProbeOn && root.btAdapter() !== null && !root.btProbeLogged && !wantOpen) {
-                root.btProbeLogged = true;
-                console.warn("[BT] backend cache untrustworthy (" + root.btCacheDesc + "), BlueZ actually Powered=true —— icon shows on (asked busctl directly, §4.9)");
-            }
-        }
-    }
-
-    Timer {
-        interval: 400
-        repeat: true
-        running: root.btWantOpen
-        onTriggered: btPoller.kick()
-    }
-
-    Timer {
-        interval: root.btWantMs
-        running: root.btWantOpen
-        onTriggered: root.btWantOpen = false
-    }
-
-    Process {
-        id: btUnblockProc
-        command: ["rfkill", "unblock", "bluetooth"]
-        onExited: code => {
-            if (code !== 0)
-                console.warn("[BT] rfkill unblock bluetooth exit code " + code + " —— block not lifted, still try one backend write (§4.9)");
-
-            if (!root.btWantOn)
-                return;
-            const a = root.btAdapter();
-
-            if (a && a.state !== BluetoothAdapterState.Blocked) {
-                a.enabled = true;
-                return;
-            }
-            console.log("[BT] backend cache still says " + root.btCacheDesc + " after unblock, this write goes to BlueZ directly via busctl (§4.9)");
-            Quickshell.execDetached(["busctl", "--system", "set-property", "org.bluez", a ? String(a.dbusPath) : "/org/bluez/hci0", "org.bluez.Adapter1", "Powered", "b", "true"]);
-        }
-    }
-    Timer {
-        id: btFallbackTimer
-        interval: 1500
-        onTriggered: {
-            if (!root.btWantOpen || !root.btWantOn)
-                return;
-            if (!root.btProbeKnown || root.btProbeOn)
-                return;
-            console.warn("[BT] still off 1.5s after backend on (BlueZ says Powered=false), bypass backend and write once via busctl" + " —— most likely backend cache still remembers rfkill block, cross-check with `rfkill list bluetooth` (§4.9)");
-            Quickshell.execDetached(["busctl", "--system", "set-property", "org.bluez", root.btAdapter() ? String(root.btAdapter().dbusPath) : "/org/bluez/hci0", "org.bluez.Adapter1", "Powered", "b", "true"]);
-        }
-    }
-
+    readonly property bool btOn: BtState.btOn
+    readonly property bool btPresent: BtState.btPresent
     function btState() {
-        return JSON.stringify({
-            adapter: root.btAdapter() ? String(root.btAdapter().dbusPath) : null,
-            cache: root.btCacheDesc,
-            cacheTrusted: root.btCacheTrusted,
-            bluezPowered: root.btProbeOn,
-            bluezKnown: root.btProbeKnown,
-            polling: !root.btCacheTrusted,
-            nAdapters: root.modelValues(Bluetooth.adapters).length,
-            notified: root.btNotified,
-            tick: root.btTick,
-            btPresent: root.btPresent,
-            btOn: root.btOn,
-            btWant: root.btWantOpen ? root.btWantOn : null,
-            rfkillFixes: root.btRfkillFixes,
-            rfkillWhy: root.btRfkillWhy || null
-        });
+        return BtState.btState();
     }
-
     function btSetEnabled(want) {
-        const a = root.btAdapter();
-
-        root.btWantOn = want;
-        root.btWantOpen = true;
-        if (want) {
-            root.btUnblock("bt on");
-            return "rfkill";
-        }
-        if (a) {
-            a.enabled = false;
-            return "backend";
-        }
-        Quickshell.execDetached(["busctl", "--system", "set-property", "org.bluez", "/org/bluez/hci0", "org.bluez.Adapter1", "Powered", "b", "false"]);
-        return "busctl";
+        return BtState.btSetEnabled(want);
     }
-
-    function btUnblock(why) {
-        root.btRfkillFixes++;
-        root.btRfkillWhy = why;
-        if (!btUnblockProc.running)
-            btUnblockProc.running = true;
-        btFallbackTimer.start();
+    function connectedBtDevice() {
+        return BtState.connectedBtDevice();
     }
 
     function pad(n) {

@@ -224,9 +224,10 @@ Module {
         }
     }
 
-    PopupWindow {
+    PopupPanel {
         id: micPopup
-        visible: false
+        panel: privacyModule.panel
+        anchorItem: privacyModule
         function open() {
             if (!privacyModule.sourceAudio)
                 return;
@@ -236,20 +237,14 @@ Module {
             micPopup.visible = false;
         }
 
-        color: "transparent"
         implicitWidth: 224
-        implicitHeight: 48 + Style.barHeight + 2 - Style.barInset
-        grabFocus: true
-        anchor.window: privacyModule.panel
-        anchor.item: privacyModule
-        anchor.edges: Edges.Bottom
-        anchor.gravity: Edges.Top
+        implicitHeight: 48 + micPopup.cardTopMargin
 
         Rectangle {
             id: micCard
             anchors.fill: parent
 
-            anchors.topMargin: Style.barHeight + 2 - Style.barInset
+            anchors.topMargin: micPopup.cardTopMargin
             radius: 12
             color: Style.card
             border.width: 1
