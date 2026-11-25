@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell.Services.Notifications
-import Quickshell.Widgets
 
 Item {
     id: card

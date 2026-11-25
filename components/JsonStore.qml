@@ -22,13 +22,19 @@ Item {
 
     property bool loaded: false
 
+    property string pendingLoadText: ""
+
     property bool dirty: false
-    readonly property bool saving: saveProc.running
+
     property int failures: 0
 
     signal textLoaded(string text)
     signal saveFailed(int code, int failures)
     signal saved
+
+    signal loadFailed(string path, int code)
+
+    property bool loadBlocked: false
 
     Component.onCompleted: if (store.loadOnStart)
         store.load()
@@ -64,6 +70,10 @@ Item {
     }
 
     function flush() {
+        if (store.loadBlocked) {
+            store.dirty = false;
+            return;
+        }
         if (!store.loaded || !store.dirty || saveProc.running || !store.serialize)
             return;
         let json = "";
@@ -84,21 +94,29 @@ Item {
         id: loadProc
         running: false
         command: ["sh", "-c", Style.readJsonCmd(store.path, store.defaultText)]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                store.textLoaded(text);
-                store.loaded = true;
 
-                if (store.dirty)
-                    store.reschedule();
-            }
+        stdout: StdioCollector {
+            onStreamFinished: store.pendingLoadText = text
         }
 
         onExited: code => {
+            if (code === 3) {
+                store.loadBlocked = true;
+                store.pendingLoadText = "";
+                store.dirty = false;
+                store.loaded = true;
+                console.warn("[JSONSTORE] cannot read " + store.path + " (exists but unreadable, exit " + code + "); write-back disabled");
+                store.loadFailed(store.path, code);
+                return;
+            }
             if (store.loaded)
                 return;
-            console.warn("[JSONSTORE] load failed for " + store.path + " (exit " + code + ")");
-            store.textLoaded("");
+            if (code !== 0) {
+                console.warn("[JSONSTORE] load failed for " + store.path + " (exit " + code + ")");
+                store.textLoaded("");
+            } else {
+                store.textLoaded(store.pendingLoadText);
+            }
             store.loaded = true;
             if (store.dirty)
                 store.reschedule();

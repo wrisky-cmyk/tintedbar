@@ -1,11 +1,9 @@
 import QtQuick
-import Quickshell
 
 PopupPanel {
     id: brightnessPopup
 
     required property var brightnessModule
-
     anchorItem: brightnessPopup.brightnessModule
 
     visible: false

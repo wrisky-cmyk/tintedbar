@@ -117,6 +117,16 @@ Item {
             pam.abort();
     }
 
+    function tryStartPam(cfg) {
+        if (pam.active)
+            pam.abort();
+
+        if (pam.config !== cfg)
+            pam.config = cfg;
+        pam.active = true;
+        return pam.active;
+    }
+
     function startPam(watchdogInterval) {
         lockScreen.pamReady = false;
 
@@ -127,9 +137,13 @@ Item {
 
         if (pam.user !== lockScreen.userName)
             pam.user = lockScreen.userName;
-        if (pam.config !== lockScreen.activePamConfig)
-            pam.config = lockScreen.activePamConfig;
-        pam.active = true;
+
+        if (!tryStartPam(lockScreen.activePamConfig) && lockScreen.activePamConfig !== "login") {
+            const missing = lockScreen.activePamConfig;
+
+            lockScreen.activePamConfig = "login";
+            console.log("[LOCK] pam config " + missing + " missing, fell back to login" + (tryStartPam("login") ? "" : " (login also failed to start)"));
+        }
         pamStartWatchdog.interval = watchdogInterval > 0 ? watchdogInterval : 2000;
         pamStartWatchdog.restart();
     }
@@ -353,7 +367,7 @@ Item {
             }
             console.log("[LOCK] compositor lacks ext-session-lock (no lock surface in 15s), abandoning this lock");
 
-            Quickshell.execDetached(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", I18n.t("lock.abandon"), I18n.t("lock.abandonBody"), "[]", "{\"urgency\": <byte 2>}", 10000]);
+            Quickshell.execDetached(["gdbus", "call", "--timeout", "3", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", I18n.t("lock.abandon"), I18n.t("lock.abandonBody"), "[]", "{\"urgency\": <byte 2>}", 10000]);
             lockScreen.unlockNow();
         }
     }
@@ -398,7 +412,7 @@ Item {
             lockScreen.pamReady = false;
 
             if (error === PamError.StartFailed && lockScreen.activePamConfig !== "login") {
-                console.log("[LOCK] pam config " + lockScreen.activePamConfig + " unavailable, fall back to login");
+                console.log("[LOCK] pam_start failed on config " + lockScreen.activePamConfig + ", falling back to login");
                 lockScreen.activePamConfig = "login";
                 lockScreen.startPam();
                 return;
@@ -637,6 +651,16 @@ Item {
                             focus: true
                             onAccepted: lockScreen.submit(text)
                             Keys.onEscapePressed: field.text = ""
+
+                            Keys.onPressed: e => {
+                                if (e.text.length !== 1)
+                                    return;
+                                const c = e.text.charCodeAt(0);
+                                if (c < 0x20 || c >= 0x7f)
+                                    return;
+                                field.insert(e.text);
+                                e.accepted = true;
+                            }
                             Component.onCompleted: field.forceActiveFocus()
 
                             Connections {

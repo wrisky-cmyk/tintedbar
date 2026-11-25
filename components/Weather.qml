@@ -360,20 +360,25 @@ Item {
             const key = line.slice(0, eq).trim().toLowerCase();
             let val = line.slice(eq + 1).trim();
 
+            const ci = val.search(/\s#/);
+            if (ci >= 0)
+                val = val.slice(0, ci).trim();
+
             if (key === "city") {
                 cityVal = val;
                 continue;
             }
-            const ci = val.search(/\s#/);
-            if (ci >= 0)
-                val = val.slice(0, ci).trim();
             const n = Number(val);
             if (!isFinite(n))
                 continue;
-            if (key === "lat" || key === "latitude")
-                la = n;
-            else if (key === "lon" || key === "lng" || key === "longitude")
-                lo = n;
+
+            if (key === "lat" || key === "latitude") {
+                if (Math.abs(n) <= 90)
+                    la = n;
+            } else if (key === "lon" || key === "lng" || key === "longitude") {
+                if (Math.abs(n) <= 180)
+                    lo = n;
+            }
         }
         wx.lat = la;
         wx.lon = lo;

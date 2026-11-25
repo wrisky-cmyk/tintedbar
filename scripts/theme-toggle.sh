@@ -3,6 +3,11 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [ ! -x "$here/theme-apply.sh" ]; then
+  echo "theme-toggle: $here/theme-apply.sh is missing or not executable, cannot apply theme" >&2
+  exit 127
+fi
+
 case "${1:-}" in
   --set) case "${2:-}" in
            dark)  m=dark ;;
@@ -12,16 +17,20 @@ case "${1:-}" in
   "")
 
          old_mode=$("$here/theme-apply.sh" --mode 2>/dev/null || true)
-         if [ "$old_mode" = "dark" ]; then
-           m=light
-         else
-           m=dark
-         fi ;;
+
+         case "$old_mode" in
+           dark)  m=light ;;
+           light) m=dark ;;
+           *) echo "theme-toggle: cannot determine current mode (theme-apply.sh --mode gave '$old_mode'), refusing to flip" >&2
+              exit 1 ;;
+         esac ;;
   *)     echo "usage: $0 [--set dark|light]" >&2; exit 1 ;;
 esac
 if [ "$m" = "dark" ]; then next=prefer-dark; else next=prefer-light; fi
 
-[ -n "${old_mode:-}" ] || old_mode=$("$here/theme-apply.sh" --mode 2>/dev/null || true)
+if [ -z "${old_mode:-}" ]; then
+  old_mode=$("$here/theme-apply.sh" --mode 2>/dev/null || true)
+fi
 
 "$here/theme-apply.sh" --force "$m"
 rc=$?

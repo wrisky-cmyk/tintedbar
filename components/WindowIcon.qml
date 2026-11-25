@@ -34,7 +34,7 @@ Item {
     property string appClass: ""
     readonly property string title: String(toplevel && toplevel.title ? toplevel.title : "")
 
-    readonly property string glyph: Style.glyphFor(winIcon.appClass, winIcon.title)
+    readonly property string glyph: Style.glyphFor()
 
     property string appIcon: ""
 
@@ -76,7 +76,7 @@ Item {
     }
 
     function refresh() {
-        const ti = Style.titleIcon(winIcon.title);
+        const ti = Style.titleIcon(winIcon.title, winIcon.appClass);
         winIcon.appliedTitleIcon = ti;
         const names = winIcon.appClass ? Style.appIconNames(winIcon.appClass) : [];
 
@@ -97,7 +97,7 @@ Item {
     property string appliedTitleIcon: ""
 
     function refreshForTitle() {
-        if (Style.titleIcon(winIcon.title) === winIcon.appliedTitleIcon)
+        if (Style.titleIcon(winIcon.title, winIcon.appClass) === winIcon.appliedTitleIcon)
             return;
         winIcon.refresh();
     }

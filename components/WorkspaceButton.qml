@@ -85,6 +85,18 @@ Item {
             if (old && (old.title !== t.title || old.class !== t.class || old.urgent !== t.urgent))
                 iconModel.setProperty(idx, "toplevel", t);
         }
+
+        for (let i = 0; i < current.length && i < iconModel.count; i++) {
+            let from = -1;
+            for (let j = i; j < iconModel.count; j++) {
+                if (same(iconModel.get(j).toplevel, current[i])) {
+                    from = j;
+                    break;
+                }
+            }
+            if (from > i)
+                iconModel.move(from, i, 1);
+        }
     }
 
     implicitWidth: Math.max(30, contentRow.implicitWidth + 12)
@@ -185,15 +197,6 @@ Item {
         return null;
     }
 
-    function dragKeyOf(t) {
-        if (!t)
-            return "";
-        if (t.address !== undefined)
-            return String(t.address);
-        if (t.__wid !== undefined)
-            return String(t.__wid);
-        return "";
-    }
     function activate() {
         if (wsBtn.queryWs) {
             Compositor.activateWorkspace(wsBtn.wsId, wsBtn.outputName);
@@ -205,6 +208,22 @@ Item {
             Compositor.dispatchWorkspace(wsBtn.wsId);
         }
     }
+
+    function handleClick(px, py) {
+        const hit = wsBtn.iconAt(px);
+        if (hit !== null) {
+            const g = wsBtn.mapToGlobal(px, py);
+            const gx = (g && isFinite(g.x)) ? g.x : null;
+            const gy = (g && isFinite(g.y)) ? g.y : null;
+            if (Compositor.debug) {
+                console.log("[CLICK] ws" + wsBtn.wsId + " px=" + px + "," + py + " keep=" + gx + "," + gy + " cls=" + String((hit.lastIpcObject && hit.lastIpcObject.class) || ""));
+            }
+            if (Compositor.focusToplevelObject(hit, gx, gy))
+                return;
+        }
+        wsBtn.activate();
+    }
+
     MouseArea {
         id: wsMouse
         anchors.fill: parent
@@ -261,7 +280,8 @@ Item {
         onClicked: {
             if (wsMouse.wasDrag)
                 return;
-            wsBtn.activate();
+
+            wsBtn.handleClick(wsMouse.pressX, wsMouse.pressY);
         }
     }
 

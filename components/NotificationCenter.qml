@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Notifications
 
@@ -86,9 +85,6 @@ Item {
     onHistoryChanged: if (center.historyLoaded)
         center.saveHistory()
 
-    property bool historySaveDirty: false
-    property int historySaveFailures: 0
-
     function saveHistory() {
         if (center.historyLoadCorrupt)
             return;
@@ -171,6 +167,8 @@ Item {
         onExited: code => {
             if (code !== 0) {
                 console.warn("[NOTIFY] could not quarantine corrupt history, exit " + code);
+
+                historyQuarantineFailedNotify.restart();
                 return;
             }
             center.historyLoadCorrupt = false;
@@ -185,6 +183,12 @@ Item {
         interval: 1500
         repeat: false
         onTriggered: Style.notifySimple(I18n.t("notif.historyCorrupt"), I18n.t("notif.historyCorruptBody"))
+    }
+    Timer {
+        id: historyQuarantineFailedNotify
+        interval: 1500
+        repeat: false
+        onTriggered: Style.notifySimple(I18n.t("notif.historyCorrupt"), I18n.t("notif.historyCorruptStuck"))
     }
 
     function snapshot(n, isOpen) {
@@ -236,7 +240,8 @@ Item {
                 time: e.time,
                 urgency: e.urgency,
                 open: !!e.open,
-                detail: !!e.detail
+                detail: !!e.detail,
+                burst: (typeof e.burst === "number" && isFinite(e.burst) && e.burst > 1) ? Math.floor(e.burst) : 1
             };
             c.appName = center.historyText(e.appName, 256);
             c.summary = center.historyText(e.summary, 1024);

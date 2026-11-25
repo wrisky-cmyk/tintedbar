@@ -168,6 +168,9 @@ Module {
                 if (brightnessModule.probeFailures < 2) {
                     brightnessModule.probeFailures++;
                     brightnessProbeRetry.restart();
+                } else {
+                    brightnessModule.probeConclusion = "no-tool";
+                    brightnessModule.probeGaveUp("no-tool");
                 }
             } else {
                 brightnessModule.probeFailures = 0;
@@ -185,6 +188,21 @@ Module {
         }
     }
     property int probeFailures: 0
+
+    property string probeConclusion: ""
+
+    Connections {
+        target: brightnessModule.qsRoot
+        function onShowBrightnessChanged() {
+            if (!brightnessModule.qsRoot.showBrightness)
+                return;
+            if (brightnessModule.probeConclusion === "")
+                return;
+            brightnessModule.probeGaveUp(brightnessModule.probeConclusion);
+        }
+    }
+
+    signal probeGaveUp(string reason)
     Timer {
         id: brightnessProbeRetry
         interval: 3000
@@ -232,6 +250,9 @@ Module {
                         if (!brightnessModule.ddcEverOk) {
                             console.log("[BRIGHT] ddcutil can't read VCP 10 (no DDC/CI on monitor?), hiding; raw output: " + text.trim().slice(0, 160));
                             brightnessModule.backend = "";
+
+                            brightnessModule.probeConclusion = "no-ddc";
+                            brightnessModule.probeGaveUp("no-ddc");
                         } else {
                             console.log("[BRIGHT] ddcutil read failed, keep old value");
 

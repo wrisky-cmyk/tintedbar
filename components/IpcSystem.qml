@@ -56,6 +56,14 @@ Item {
         }
 
         function set(p: int): string {
+            if (!(p >= 0 && p <= 100)) {
+                console.log("[BRIGHT] ipc set rejected, out of range: " + p);
+                return JSON.stringify({
+                    rejected: "out-of-range",
+                    requested: p,
+                    hint: "0..100"
+                });
+            }
             const m = root.qsRoot.panelForFocused(root.qsRoot.brightnessByScreen);
             if (m)
                 m.setPct(p, "ipc");
@@ -63,6 +71,13 @@ Item {
         }
         function step(d: int): string {
             const m = root.qsRoot.panelForFocused(root.qsRoot.brightnessByScreen);
+
+            if (!isFinite(d) || d === 0) {
+                return JSON.stringify({
+                    rejected: "bad-step",
+                    requested: d
+                });
+            }
             if (m)
                 m.stepPct(d, "ipc");
             return root.qsRoot.brightnessIpcState();

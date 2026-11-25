@@ -1,7 +1,7 @@
 {
-  "version": "26.11.22",
-  "fingerprint": "2464d7ec",
+  "version": "26.11.25",
+  "fingerprint": "26e19abe",
   "packaging": "stripped",
   "quickshell": "0.3.2",
-  "built": "2026-11-22T23:05:56+0800"
+  "built": "2026-11-25T14:45:19+0800"
 }

@@ -133,7 +133,8 @@ case "${id%.desktop}" in
 
         command -v ghostty >/dev/null 2>&1 \
             || { echo "launch-desktop: ghostty not found, cannot start yazi" >&2; exit 127; }
-        exec ghostty --class=yazi -e yazi ;;
+
+        exec ghostty -e yazi ;;
 esac
 
 in_entry=0

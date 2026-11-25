@@ -1,7 +1,6 @@
 pragma Singleton
 
 import QtQuick
-import Quickshell
 import Quickshell.Io
 
 Item {
@@ -11,11 +10,16 @@ Item {
     property bool loaded: false
     property bool pendingSave: false
 
+    property bool usageLoadCorrupt: false
+
     readonly property string stateDir: Style.stateDir
 
     function bump(key) {
         const k = String(key || "");
         if (k === "")
+            return;
+
+        if (store.usageLoadCorrupt)
             return;
         const u = Object.assign({}, store.usage);
         u[k] = (u[k] || 0) + 1;
@@ -30,14 +34,28 @@ Item {
         defaultText: "{}"
         serialize: () => JSON.stringify(store.usage)
         onTextLoaded: text => {
-            let loaded = {};
+            let saved = {};
+            let parseOk = true;
             try {
-                loaded = JSON.parse(String(text));
+                saved = JSON.parse(String(text));
             } catch (e) {
-                loaded = {};
+                parseOk = false;
             }
-            if (!loaded || typeof loaded !== "object" || Array.isArray(loaded))
-                loaded = {};
+
+            if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+                saved = {};
+
+                if (text.trim() !== "" && text.trim() !== "{}")
+                    parseOk = false;
+            }
+            if (!parseOk) {
+                console.warn("[USAGE] launcher-usage.json is corrupt; quarantining as .corrupt");
+                store.usageLoadCorrupt = true;
+                usageQuarantine.running = true;
+
+                return;
+            }
+            const loaded = saved;
             const merged = Object.assign({}, loaded);
             for (const k in store.usage)
                 merged[k] = Math.max(merged[k] || 0, store.usage[k] || 0);
@@ -46,6 +64,26 @@ Item {
             if (store.pendingSave) {
                 store.pendingSave = false;
                 requestSave();
+            }
+        }
+    }
+
+    Process {
+        id: usageQuarantine
+        running: false
+        command: ["sh", "-c", "mv -f " + Style.sq(store.stateDir + "/launcher-usage.json") + " " + Style.sq(store.stateDir + "/launcher-usage.json.corrupt")]
+        onExited: code => {
+            if (code !== 0) {
+                console.warn("[USAGE] could not quarantine corrupt usage file, exit " + code + "; write-back stays disabled");
+                return;
+            }
+            store.usageLoadCorrupt = false;
+            store.usage = ({});
+            store.loaded = true;
+            console.warn("[USAGE] corrupt usage file quarantined as .corrupt; starting fresh");
+            if (store.pendingSave) {
+                store.pendingSave = false;
+                jsonStore.requestSave();
             }
         }
     }

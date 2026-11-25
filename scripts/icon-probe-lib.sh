@@ -15,10 +15,22 @@ CHAIN=""
 for base in "$HOME/.local/share/icons" /usr/share/icons; do
   [ -f "$base/$t/index.theme" ] && CHAIN="$CHAIN $(sed -n 's/^Inherits=//p' "$base/$t/index.theme" | tr ',' ' ')"
 done
+
+ICON_CHAIN=""
+for _w in $CHAIN hicolor Adwaita default; do
+  [ "$_w" = "$t" ] && continue
+  _skip=0
+  for _seen in $ICON_CHAIN; do
+    [ "$_seen" = "$_w" ] && { _skip=1; break; }
+  done
+  [ "$_skip" = 1 ] && continue
+  ICON_CHAIN="$ICON_CHAIN $_w"
+done
+unset _w _seen _skip
 try_name() {
   n="$1"
 
-  for th in "$t" $CHAIN hicolor Adwaita default; do
+  for th in "$t" $ICON_CHAIN; do
     for base in "$HOME/.local/share/icons" /usr/share/icons; do
       [ -d "$base/$th" ] || continue
 

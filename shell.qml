@@ -1,3 +1,5 @@
+//@ pragma UseQApplication
+
 import QtQuick
 import QtQuick.Window
 import Quickshell
@@ -163,7 +165,7 @@ ShellRoot {
 
             const title = names !== "" ? I18n.t("power.inhibit") : I18n.t("power.failed");
             const body = names !== "" ? I18n.t("power.inhibitBody") + names : I18n.t("power.failedBody");
-            blockedNotifyProc.command = ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", title, body, "[" + Style.gvStr(actionId) + ", " + Style.gvStr(actionLabel) + "]", "{\"urgency\": <byte 2>, \"x-quickshell-power\": <\"" + op + "\">}", 20000];
+            blockedNotifyProc.command = ["gdbus", "call", "--timeout", "3", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", title, body, "[" + Style.gvStr(actionId) + ", " + Style.gvStr(actionLabel) + "]", "{\"urgency\": <byte 2>, \"x-quickshell-power\": <\"" + op + "\">}", 20000];
             blockedNotifyProc.running = true;
         }
 
@@ -769,6 +771,18 @@ ShellRoot {
             valid: v => v === "auto" || Style.paletteIds.indexOf(v) >= 0,
             read: () => Style.paletteName,
             write: v => Style.paletteName = v
+        },
+        {
+            key: "fontWarned",
+            valid: v => typeof v === "boolean",
+            read: () => qsRoot.fontWarned,
+            write: v => qsRoot.fontWarned = v
+        },
+        {
+            key: "brightnessWarned",
+            valid: v => typeof v === "boolean",
+            read: () => qsRoot.brightnessWarned,
+            write: v => qsRoot.brightnessWarned = v
         }
     ]
 
@@ -877,6 +891,9 @@ ShellRoot {
                 themeApplyRetry.restart();
                 return;
             }
+
+            if (code === 76)
+                console.log("[THEME] theme-apply partially applied (rc=76); " + "see the script's stderr for which step was skipped");
             if (qsRoot.themeApplyPending) {
                 qsRoot.themeApplyPending = false;
                 themeApply.running = true;
@@ -925,11 +942,23 @@ ShellRoot {
         onSaveFailed: (code, failures) => console.warn("[QS] bar-settings save failed, exitCode " + code)
         onTextLoaded: text => {
             let saved = {};
+            let parseOk = true;
             try {
                 saved = JSON.parse(text);
-            } catch (e) {}
-            if (!saved || typeof saved !== "object" || Array.isArray(saved))
+            } catch (e) {
+                parseOk = false;
+            }
+
+            if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
                 saved = {};
+                if (text.trim() !== "" && text.trim() !== "{}")
+                    parseOk = false;
+            }
+            if (!parseOk) {
+                console.warn("[QS] bar-settings JSON is corrupt; quarantining as .corrupt");
+
+                barSettingsQuarantine.running = true;
+            }
             for (const k of qsRoot.showFlags)
                 if (saved[k] !== undefined)
                     qsRoot[k] = saved[k] === true;
@@ -946,11 +975,28 @@ ShellRoot {
                 qsRoot.idleInhibited = false;
 
             qsRoot.barSettingsLoaded = true;
+
+            qsRoot.checkFonts();
             if (qsRoot.barSettingsPending) {
                 qsRoot.barSettingsPending = false;
                 qsRoot.saveBarSettings();
             }
             qsRoot.settleHistoryLimit();
+        }
+    }
+
+    Process {
+        id: barSettingsQuarantine
+        running: false
+        command: ["sh", "-c", "mv -f " + Style.sq(qsRoot.stateDir + "/bar-settings.json") + " " + Style.sq(qsRoot.stateDir + "/bar-settings.json.corrupt")]
+        onExited: code => {
+            if (code !== 0) {
+                console.warn("[QS] could not quarantine corrupt bar-settings, exit " + code);
+                return;
+            }
+
+            if (qsRoot.barSettingsLoaded)
+                qsRoot.saveBarSettings();
         }
     }
 
@@ -964,6 +1010,60 @@ ShellRoot {
 
     property bool barSettingsLoaded: false
     property bool barSettingsPending: false
+
+    property bool fontWarned: false
+    function checkFonts() {
+        if (!qsRoot.barSettingsLoaded)
+            return;
+        if (qsRoot.fontWarned)
+            return;
+        if (Style.nerd !== "")
+            return;
+        qsRoot.fontWarned = true;
+        qsRoot.saveBarSettings();
+
+        fontWarnNotify.restart();
+    }
+    Timer {
+        id: fontWarnNotify
+        interval: 2500
+        repeat: false
+
+        onTriggered: Style.notifySimple(I18n.t("font.noNerdTitle"), I18n.t("font.noNerdBody"), 10000)
+    }
+
+    property bool brightnessWarned: false
+    property string brightnessWarnReason: ""
+
+    property bool brightnessWarnPending: false
+    function brightnessProbeGaveUp(reason) {
+        if (!qsRoot.barSettingsLoaded)
+            return;
+        if (qsRoot.brightnessWarned)
+            return;
+        if (qsRoot.brightnessWarnPending)
+            return;
+        if (!qsRoot.showBrightness)
+            return;
+        qsRoot.brightnessWarnPending = true;
+        qsRoot.brightnessWarnReason = String(reason || "");
+        brightnessWarnNotify.restart();
+    }
+    Timer {
+        id: brightnessWarnNotify
+        interval: 1500
+        repeat: false
+        onTriggered: {
+            qsRoot.brightnessWarnPending = false;
+            const ddc = qsRoot.brightnessWarnReason === "no-ddc";
+
+            Style.notifySimple(I18n.t("brightness.noBackendTitle"), I18n.t(ddc ? "brightness.noDdcBody" : "brightness.noToolBody"), 10000);
+
+            qsRoot.brightnessWarned = true;
+            qsRoot.saveBarSettings();
+        }
+    }
+
     function settleHistoryLimit() {
         if (qsRoot.barSettingsLoaded && notifCenter.historyLoaded) {
             notifCenter.historySettled = true;
@@ -1121,7 +1221,7 @@ ShellRoot {
 
         if (rebootNotifyProc.running)
             return;
-        rebootNotifyProc.command = ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", action.icon, notice.title, notice.body, "[" + Style.gvStr(action.id) + ", " + Style.gvStr(action.label) + "]", "{\"x-quickshell-reboot\": <\"1\">}", "5000"];
+        rebootNotifyProc.command = ["gdbus", "call", "--timeout", "3", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", action.icon, notice.title, notice.body, "[" + Style.gvStr(action.id) + ", " + Style.gvStr(action.label) + "]", "{\"x-quickshell-reboot\": <\"1\">}", "5000"];
         rebootNotifyProc.running = true;
     }
 
@@ -1496,7 +1596,7 @@ ShellRoot {
                                 Compositor.clearPendingWsSwitch();
                             const pre = Compositor.takePendingWsSwitch();
 
-                            Quickshell.execDetached(["env", "QS_NOBROWSER=" + I18n.t("hint.noBrowser"), "QS_LAUNCHER=" + Style.configDir + "/scripts/launch-desktop.sh", "bash", "-c", (pre !== "" ? pre + "; " : "") + "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then \"$QS_LAUNCHER\" \"$id\" && exit 0; fi; " + "xdg-open about:blank 2>/dev/null && exit 0; " + "exec gdbus call --session --dest org.freedesktop.Notifications " + "--object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOBROWSER\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
+                            Quickshell.execDetached(["env", "QS_NOBROWSER=" + I18n.t("hint.noBrowser"), "QS_LAUNCHER=" + Style.configDir + "/scripts/launch-desktop.sh", "bash", "-c", (pre !== "" ? pre + "; " : "") + "id=$(xdg-settings get default-web-browser 2>/dev/null); " + "if [ -n \"$id\" ]; then \"$QS_LAUNCHER\" \"$id\" && exit 0; fi; " + "xdg-open about:blank 2>/dev/null && exit 0; " + "exec gdbus call --session --dest org.freedesktop.Notifications " + "--object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "--timeout 3 " + "quickshell 0 \"\" \"$QS_NOBROWSER\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
                         }
                     }
 
@@ -1516,7 +1616,7 @@ ShellRoot {
                             else
                                 Compositor.clearPendingWsSwitch();
                             const pre = Compositor.takePendingWsSwitch();
-                            Quickshell.execDetached(["env", "QS_NOFM=" + I18n.t("hint.noFileManager"), "bash", "-c", (pre !== "" ? pre + "; " : "") + "xdg-open \"$HOME\" 2>/dev/null || exec gdbus call --session " + "--dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "quickshell 0 \"\" \"$QS_NOFM\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
+                            Quickshell.execDetached(["env", "QS_NOFM=" + I18n.t("hint.noFileManager"), "bash", "-c", (pre !== "" ? pre + "; " : "") + "xdg-open \"$HOME\" 2>/dev/null || exec gdbus call --session " + "--dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications " + "--method org.freedesktop.Notifications.Notify " + "--timeout 3 " + "quickshell 0 \"\" \"$QS_NOFM\" \"\" \"[]\" " + "'{\"urgency\": <byte 1>}' 4000"]);
                         }
                     }
                 }
@@ -2028,6 +2128,8 @@ ShellRoot {
                         id: brightnessModule
                         qsRoot: rootRef
                         brightnessPopup: brightnessPopupRef
+
+                        onProbeGaveUp: reason => qsRoot.brightnessProbeGaveUp(reason)
 
                         BrightnessPopup {
                             id: brightnessPopup

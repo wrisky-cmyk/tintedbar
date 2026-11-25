@@ -99,7 +99,7 @@ Module {
         const min = pomodoro.inBreak ? (pomodoro.phase === "long" ? pomodoro.longMin : pomodoro.breakMin) : pomodoro.focusMin;
 
         const pauseLabel = I18n.t(pomodoro.inBreak ? "pomodoro.pauseFocus" : "pomodoro.pauseBreak");
-        Quickshell.execDetached(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "pomodoro", "0", "", I18n.t(key), I18n.fill(I18n.t(key + "Body"), {
+        Quickshell.execDetached(["gdbus", "call", "--timeout", "3", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "pomodoro", "0", "", I18n.t(key), I18n.fill(I18n.t(key + "Body"), {
                 n: min
             }), "[" + Style.gvStr("pause") + ", " + Style.gvStr(pauseLabel) + "]", "{\"x-quickshell-pomodoro\": <\"pause\">}", 15000]);
         if (pomodoro.phase === "focus") {

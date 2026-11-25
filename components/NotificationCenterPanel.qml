@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Window
 import Quickshell.Services.Notifications
-import Quickshell.Widgets
 
 Item {
     id: panel
@@ -41,8 +40,6 @@ Item {
         }
         return cap;
     }
-
-    readonly property bool listOverflows: entries.implicitHeight > panel.listHeight + 1
 
     readonly property int entryCount: panel.center ? panel.center.history.length : 0
 

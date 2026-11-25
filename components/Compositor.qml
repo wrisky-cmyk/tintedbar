@@ -19,18 +19,23 @@ Item {
 
     readonly property string name: {
         const d = String(Quickshell.env("XDG_CURRENT_DESKTOP") || "").toLowerCase();
+        const swaySock = String(Quickshell.env("SWAYSOCK") || "");
+        const niriSock = String(Quickshell.env("NIRI_SOCKET") || "");
+        const hyprSig = String(Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || "");
+
         if (d.indexOf("niri") >= 0)
             return "niri";
-
-        if (d.indexOf("hyprland") >= 0)
+        if (d.indexOf("hyprland") >= 0 && hyprSig !== "")
             return "hyprland";
+
+        if (swaySock !== "")
+            return "sway";
         if (d.indexOf("sway") >= 0)
             return "sway";
-        if (String(Quickshell.env("NIRI_SOCKET") || "") !== "")
+        if (d.indexOf("hyprland") >= 0)
+            return "hyprland";
+        if (niriSock !== "")
             return "niri";
-
-        if (String(Quickshell.env("SWAYSOCK") || "") !== "")
-            return "sway";
         return "hyprland";
     }
 
@@ -117,7 +122,16 @@ Item {
     Process {
         id: niriEvents
         running: root.name === "niri"
-        command: ["sh", "-c", "for i in $(seq 1 50); do [ -S \"$NIRI_SOCKET\" ] && break; sleep 0.2; done; " + "exec niri msg --json event-stream"]
+
+        command: ["sh", "-c", `
+              for i in $(seq 1 50); do [ -S "$NIRI_SOCKET" ] && break; sleep 0.2; done
+              P=$PPID
+              niri msg --json event-stream & B=$!
+              trap 'kill -KILL $B 2>/dev/null; exit 0' TERM INT
+              ( while kill -0 $P 2>/dev/null; do sleep 0.5; done
+                kill -KILL $B 2>/dev/null ) &
+              wait $B
+          `]
         stdout: SplitParser {
             onRead: data => root.handleNiriEvent(data)
         }
@@ -134,11 +148,34 @@ Item {
             niriEvents.running = true
     }
 
+    function niriPosOf(w) {
+        const p = w && w.layout && w.layout.pos_in_scrolling_layout;
+        return p || [Infinity, Infinity];
+    }
+
+    function sortNiriWindows() {
+        root.niriWindows = root.niriWindows.slice().sort((a, b) => {
+            const pa = a.pos || [Infinity, Infinity];
+            const pb = b.pos || [Infinity, Infinity];
+            if (pa[0] !== pb[0])
+                return pa[0] - pb[0];
+            return pa[1] - pb[1];
+        });
+    }
     function applyNiriWindows(arr) {
         if (!Array.isArray(arr))
             return;
+
+        const ordered = arr.slice().sort((a, b) => {
+            const pa = root.niriPosOf(a);
+            const pb = root.niriPosOf(b);
+            if (pa[0] !== pb[0])
+                return pa[0] - pb[0];
+            return pa[1] - pb[1];
+        });
+
         const kept = [];
-        for (const w of arr) {
+        for (const w of ordered) {
             let e = null;
 
             const app = String(w.app_id || "");
@@ -152,6 +189,7 @@ Item {
                     wid: w.id,
                     wsid: w.workspace_id,
                     focused: false,
+                    pos: root.niriPosOf(w),
                     obj: {
                         __wid: w.id,
                         urgent: !!w.is_urgent,
@@ -173,6 +211,7 @@ Item {
                 e.obj.lastIpcObject.class = app;
                 e.obj.urgent = !!w.is_urgent;
                 e.wsid = w.workspace_id;
+                e.pos = root.niriPosOf(w);
             }
             e.focused = !!w.is_focused;
             kept.push(e);
@@ -314,6 +353,8 @@ Item {
                 found.wsid = w.workspace_id;
                 found.focused = focused;
 
+                found.pos = root.niriPosOf(w);
+
                 if (root.niriTitlePending[String(w.id)] !== undefined) {
                     const np = Object.assign({}, root.niriTitlePending);
                     delete np[String(w.id)];
@@ -327,6 +368,7 @@ Item {
                         wid: w.id,
                         wsid: w.workspace_id,
                         focused: !!w.is_focused,
+                        pos: root.niriPosOf(w),
                         obj: {
                             __wid: w.id,
                             urgent: !!w.is_urgent,
@@ -342,6 +384,34 @@ Item {
                         }
                     }
                 ]);
+
+                root.sortNiriWindows();
+            }
+        } else if (key === "WindowLayoutsChanged") {
+            const ch = v.changes;
+            if (Array.isArray(ch) && ch.length > 0) {
+                let touched = false;
+                for (const it of ch) {
+                    if (!Array.isArray(it) || it.length < 2)
+                        continue;
+                    const wid = it[0];
+                    const lay = it[1] || {};
+                    const pos = lay.pos_in_scrolling_layout || [Infinity, Infinity];
+                    for (const w of root.niriWindows) {
+                        if (!root.sameWid(w.wid, wid))
+                            continue;
+
+                        const op = w.pos || [Infinity, Infinity];
+                        if (op[0] !== pos[0] || op[1] !== pos[1]) {
+                            w.pos = pos;
+                            touched = true;
+                        }
+                        break;
+                    }
+                }
+
+                if (touched)
+                    root.sortNiriWindows();
             }
         } else if (key === "WindowClosed") {
             const cid = (v.id !== undefined) ? v.id : v.window_id;
@@ -402,7 +472,16 @@ Item {
     Process {
         id: swayEvents
         running: root.name === "sway"
-        command: ["sh", "-c", "for i in $(seq 1 50); do [ -S \"$SWAYSOCK\" ] && break; sleep 0.2; done; " + "exec swaymsg -t subscribe '[\"window\",\"workspace\",\"output\",\"input\"]' -m"]
+
+        command: ["sh", "-c", `
+              for i in $(seq 1 50); do [ -S "$SWAYSOCK" ] && break; sleep 0.2; done
+              P=$PPID
+              swaymsg -t subscribe '["window","workspace","output","input"]' -m & B=$!
+              trap 'kill -KILL $B 2>/dev/null; exit 0' TERM INT
+              ( while kill -0 $P 2>/dev/null; do sleep 0.5; done
+                kill -KILL $B 2>/dev/null ) &
+              wait $B
+          `]
         stdout: SplitParser {
             onRead: data => root.handleSwayEvent(data)
         }
@@ -791,6 +870,15 @@ Item {
         return String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\r/g, "\\r").replace(/\n/g, "\\n");
     }
 
+    readonly property var luaDsp: ({
+            dpms: on => 'hl.dsp.dpms({ action = "' + (on ? "on" : "off") + '" })',
+            closeWindow: () => "hl.dsp.window.close()",
+            focusWorkspace: id => 'hl.dsp.focus({ workspace = "' + root.luaStr(String(id)) + '" })',
+            focusWindow: pattern => 'hl.dsp.focus({ window = "' + root.luaStr(pattern) + '" })',
+            moveWindowTo: ws => 'hl.dsp.window.move({ workspace = "' + root.luaStr(ws) + '" })',
+            cursorMove: (x, y) => 'hl.dsp.cursor.move({ x = ' + Math.round(x) + ', y = ' + Math.round(y) + ' })'
+        })
+
     function niriOnOutput(outputName, actionArgs) {
         const out = String(outputName || "");
         if (out === "" || out === root.niriFocusedOutput)
@@ -817,7 +905,7 @@ Item {
             return;
         }
 
-        Hyprland.dispatch('hl.dsp.dpms({ action = "' + (enable ? "on" : "off") + '" })');
+        Hyprland.dispatch(root.luaDsp.dpms(enable));
     }
 
     function closeWindow() {
@@ -830,7 +918,7 @@ Item {
             return;
         }
 
-        Hyprland.dispatch("hl.dsp.window.close()");
+        Hyprland.dispatch(root.luaDsp.closeWindow());
     }
 
     function activateWorkspace(id, outputName) {
@@ -851,20 +939,20 @@ Item {
             return;
         }
 
-        Hyprland.dispatch('hl.dsp.focus({ workspace = "' + root.luaStr(String(id)) + '" })');
+        Hyprland.dispatch(root.luaDsp.focusWorkspace(id));
     }
 
     function dispatchWorkspace(id) {
         if (root.debug)
             console.log("[WSBTN]", id, "no ws object, lua dispatch");
 
-        Hyprland.dispatch('hl.dsp.focus({ workspace = "' + root.luaStr(String(id)) + '" })');
+        Hyprland.dispatch(root.luaDsp.focusWorkspace(id));
     }
 
     function focusWindowByAddress(cls, addr) {
         const pattern = addr !== "" ? "address:" + addr : "class:" + root.luaStr(cls);
 
-        Hyprland.dispatch('hl.dsp.focus({ window = "' + root.luaStr(pattern) + '" })');
+        Hyprland.dispatch(root.luaDsp.focusWindow(pattern));
     }
 
     readonly property int wsCapMax: 20
@@ -1000,6 +1088,8 @@ Item {
 
         if (firstEmpty > 0) {
             activateWorkspace(firstEmpty);
+
+            root.pendingWsSwitch = "hyprctl dispatch " + root.sq("hl.dsp.focus({ workspace = \"" + root.luaStr(String(firstEmpty)) + "\" })");
             switched = true;
             root.kickEmptyWsResync();
         }
@@ -1040,7 +1130,7 @@ Item {
 
         const a = String(address);
         const full = a.startsWith("0x") ? a : "0x" + a;
-        Hyprland.dispatch('hl.dsp.focus({ window = "address:' + root.luaStr(full) + '" })');
+        Hyprland.dispatch(root.luaDsp.focusWindow("address:" + full));
         wsCursorX = dropX;
         wsCursorY = dropY;
         pendingMoveTarget = String(targetWs);
@@ -1050,10 +1140,44 @@ Item {
         id: settleMoveTimer
         interval: 80
         onTriggered: {
-            Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + root.luaStr(pendingMoveTarget) + '" })');
+            Hyprland.dispatch(root.luaDsp.moveWindowTo(pendingMoveTarget));
 
-            Hyprland.dispatch('hl.dsp.cursor.move({ x = ' + Math.round(root.wsCursorX) + ', y = ' + Math.round(root.wsCursorY) + ' })');
+            Hyprland.dispatch(root.luaDsp.cursorMove(root.wsCursorX, root.wsCursorY));
         }
+    }
+
+    function focusToplevelObject(t, keepX, keepY) {
+        if (!t)
+            return false;
+
+        const wid = t.__wid;
+        if (root.name === "sway") {
+            if (wid === undefined)
+                return false;
+            Quickshell.execDetached(["swaymsg", "[con_id=" + String(wid) + "]", "focus"]);
+            return true;
+        }
+        if (root.name === "niri") {
+            if (wid === undefined)
+                return false;
+            Quickshell.execDetached(["niri", "msg", "action", "focus-window", "--id", String(wid)]);
+            return true;
+        }
+
+        const o = t.lastIpcObject;
+        const raw = String((o && o.address) || t.address || "");
+        if (root.debug) {
+            console.log("[FOCUS] click-focus toplevel: ipcAddr=" + String((o && o.address) || "") + " rawAddr=" + raw + " cls=" + String((o && o.class) || ""));
+        }
+        if (raw === "")
+            return false;
+        const full = raw.startsWith("0x") ? raw : "0x" + raw;
+        Hyprland.dispatch(root.luaDsp.focusWindow("address:" + full));
+
+        if (keepX !== null && keepY !== null) {
+            Hyprland.dispatch(root.luaDsp.cursorMove(keepX, keepY));
+        }
+        return true;
     }
 
     function focusAppWindow(candidates) {

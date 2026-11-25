@@ -315,7 +315,6 @@ OverlayPanel {
 
             Item {
                 width: parent.width
-
                 height: parent.height - 44 - (calcRow.visible ? 44 : 0)
 
                 ListView {
@@ -369,7 +368,7 @@ OverlayPanel {
                             anchors.centerIn: appImg
                             visible: !appImg.visible
 
-                            text: Style.glyphFor(row.modelData.name, row.modelData.name) || "●"
+                            text: Style.glyphFor() || "●"
                             color: Style.text1
                             font.family: Style.nerd
                             font.pixelSize: 18

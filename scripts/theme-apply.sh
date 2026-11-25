@@ -96,24 +96,29 @@ fi
 th=""
 if ! th=$(gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null); then
   echo "theme-apply: failed to read gtk-theme, skipping GTK4 CSS swap" >&2
-  exit 0
+  exit 76
 fi
 th=${th#\'}; th=${th%\'}
 case "$th" in
   ""|/*|*/*|*..*|.*)
 
     echo "theme-apply: refusing unsafe theme name: $th" >&2
-    exit 0 ;;
+    exit 76 ;;
 esac
 theme_dir=""
 for d in "$HOME/.local/share/themes" /usr/share/themes; do
   [ -d "$d/$th" ] && theme_dir="$d/$th" && break
 done
-[ -n "$theme_dir" ] || exit 0
+
+if [ -z "$theme_dir" ]; then
+  echo "theme-apply: theme $th is not installed under ~/.local/share/themes or /usr/share/themes, nothing applied" >&2
+  exit 76
+fi
 
 st="${XDG_STATE_HOME:-$HOME/.local/state}/quickshell"
-acc=$(bash "$here/theme-css.sh" "$th" 2>/dev/null \
-  | sed -n 's/^theme_selected_bg_color=//p' | head -n 1)
+
+css_all=$(bash "$here/theme-css.sh" "$th" 2>/dev/null)
+acc=$(printf '%s\n' "$css_all" | sed -n 's/^theme_selected_bg_color=//p' | sed -n '1p')
 
 thj=$(printf '%s' "$th" | tr -d '"\\')
 if mkdir -p "$st" && tmp=$(mktemp "$st/theme-palette.XXXXXX"); then
@@ -153,7 +158,7 @@ if [ -f "$theme_dir/gtk-4.0/gtk.css" ]; then
 
   if ! tmp=$(mktemp "${dst}.XXXXXX"); then
     echo "theme-apply: failed to create temp file, skipping GTK4 CSS swap" >&2
-    exit 0
+    exit 76
   fi
   if cp -- "$theme_dir/gtk-4.0/$variant" "$tmp"; then
     chmod 0644 "$tmp"
@@ -163,6 +168,7 @@ if [ -f "$theme_dir/gtk-4.0/gtk.css" ]; then
   fi
 fi
 
+dst=
 if [ -f "$theme_dir/gtk-3.0/gtk.css" ]; then
   dst="$cfg/gtk-3.0/gtk.css"
   mkdir -p "${dst%/*}"
@@ -199,7 +205,7 @@ if [ -n "${dst:-}" ]; then
   [ -f "$theme_dir/gtk-3.0/$variant" ] || variant='gtk.css'
   if ! tmp=$(mktemp "${dst}.XXXXXX"); then
     echo "theme-apply: failed to create temp file, skipping GTK3 CSS swap" >&2
-    exit 0
+    exit 76
   fi
 
   if {

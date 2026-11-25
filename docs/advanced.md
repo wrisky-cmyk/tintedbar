@@ -106,13 +106,16 @@ ssh-keygen -Y verify -n tintedbar-dist -f allowed_signers -I '<发布者身份>'
 | 现象 | 排查方向 |
 | --- | --- |
 | 栏没有出现 | 查看日志中的 `Failed to load`（热重载时也会输出）；语法错误时栏不会自行恢复 |
-| 图标显示为豆腐块 / 中文变成方框 | Nerd Font 首选缺失会在日志输出 `[FONT]` WARN，并自动改用其它已安装的 Nerd Font；若仍无图标，安装 v3+ Nerd Font，或在 `Style.qml` 顶部指定已安装的家族。中文方框说明系统缺少可用 CJK 字体 |
+| 图标显示为豆腐块 / 中文变成方框 | Nerd Font 首选缺失会在日志输出 `[FONT]` WARN，并自动改用其它已安装的 Nerd Font——**只要装了任意一款 Nerd Font，图标就正常**，不必是首选那款。一个 Nerd Font 都没有时才会弹通知提醒（只提醒一次，记在 `bar-settings.json` 的 `fontWarned`；装好字体后标记留着也无妨）。中文方框说明系统连一个可用 CJK 字体都没有（首选缺失会交给 fontconfig 逐字回退，通常仍有中文） |
 | 天气不显示 | 检查设置中的“天气”开关、`weather.conf` 是否填写坐标，以及能否连接 Open-Meteo |
 | 剪贴板面板一直为空 | 合成器 autostart 中缺少 `wl-paste --watch cliphist store`（cliphist 未装或写入端未跑时，面板空态会直接提示并附命令） |
 | 某个模块空白 | 多数是 D-Bus 服务未运行（NetworkManager / UPower / BlueZ / PipeWire） |
-| 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。内置屏拖动滑条时会实时跟随；外接屏松手后约 0.5~4 秒才跟上属正常，DDC/CI 在一次写入后会短暂拒绝后续命令。`quickshell ipc call brightness state` 可查 backend / percent |
+| 通知历史变空 / 新通知关机后就没了 | 历史文件损坏时会被改名成 `notification-history.json.corrupt` 再重新开始记录（有通知说明）。若改名也失败（目录或文件没有写权限），停写会一直持续、通知不再落盘，同样有通知说明——修权限后重启即可再试 |
+| 亮度模块不出现或调节异常 | 模块不出现：设置面板右栏的“亮度”开关没开（默认关），或两个后端都不可用——内置屏走 /sys/class/backlight（写走 logind），外接屏走 ddcutil，先用 `ddcutil detect` 验证 DDC/CI 与 i2c 组权限（需安装 ddcutil 且用户在 i2c 组）。**开关开着却整块不出现时会弹一次通知**，并区分两种情况：通知说“没找到亮度通道” = 没装 ddcutil，装了有戏；说“ddcutil 已经装了但读不到 VCP 10” = 显示器**不支持 DDC/CI**（多数无解，少数能在 OSD 菜单里打开）或当前用户不在 i2c 组（能修）。装了 ddcutil 要重载配置才认（探测只在启动跑一次）。**运行中才打开这个开关也会补提示**——不用重启去等它。内置屏拖动滑条时会实时跟随；外接屏松手后约 0.5~4 秒才跟上属正常，DDC/CI 在一次写入后会短暂拒绝后续命令。`quickshell ipc call brightness state` 可查 backend / percent |
 | 修改 `.qml` 后没有变化 | 保存的可能是未被加载的文件；在日志中搜索 `Reloading configuration` / `Configuration Loaded` |
 | `ipc call` 报找不到 target / 名称错误 | 用 `quickshell ipc show` 列出当前所有 target 与子命令 |
+| 某个窗口图标不对 / 是空白 | `quickshell ipc call icons audit` 会逐个列出当前窗口能否解析出图标（`ok` / `missing` / `pending`，`summary` 是一句话结论）：`missing` 说明按窗口 class 与标题都没找到匹配的 `.desktop`，可以自己写一个补上，或用 `icons list` 只取窗口 class 清单。刚开的窗口可能还在首次探测中（`pending`），稍后重查即可。它读的就是栏上真正显示的那个图标，不是另算一套 |
+| 面板开在了不认识的屏幕上 / 多屏判断异常 | `quickshell ipc call registry dump` 一行 JSON：`focused` 是当前判定的聚焦屏名，`screens` 是本实例看到的所有屏，`roles` 是每个面板角色在各屏的登记项（`visible` 与宽高；空 `{}` 表示该面板还没创建，不是错误）。只读，不改任何状态 |
 | 锁屏无法进入 | 连续输错 3 次会进入 `pam_faillock` 冷却（等待 10 分钟或切换 TTY；见“锁屏”） |
 | 想确认运行的是哪一版 | 查看设置面板右栏最下方的**版本**，或日志开头的 `[QS] config version <日期>`；带 `≠` 表示内容被改动过（见“版本与指纹”） |
 

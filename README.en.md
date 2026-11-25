@@ -25,7 +25,8 @@ There is no persistent Python/Node process, and it uses the network only for wea
 ## Highlights
 
 - Window title and close button sit in the center of the bar, treating the bar as part of the window.
-- Designed for small screens: one window per workspace, with real window icons on workspace buttons.
+- Designed for small screens: one window per workspace, with real window icons on workspace buttons;
+  **click an icon to focus that window**.
 - Useful without bloat: complex features are out of scope; day-to-day setup is weather
   coordinates and switching wallpapers from the bar icon (hand-written mappings still work).
 

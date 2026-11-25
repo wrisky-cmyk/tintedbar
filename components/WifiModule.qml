@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 
 Module {
     id: wifiModule

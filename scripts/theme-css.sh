@@ -105,6 +105,7 @@ resolve() {
   printf '%s\n' "$v"
 }
 
+out=()
 for k in "${!defs[@]}"; do
   v=$(resolve "$k") || continue
   [ -n "$v" ] || continue
@@ -113,14 +114,16 @@ for k in "${!defs[@]}"; do
       h=${v#\#}
       case "${#h}" in 3|4|6|8) ;; *) continue ;; esac
       case "$h" in *[!0-9A-Fa-f]*) continue ;; esac
-      printf '%s=%s\n' "$k" "$v" ;;
-    rgb\(*|rgba\(*) printf '%s=%s\n' "$k" "$v" ;;
+      out+=("$k=$v") ;;
+    rgb\(*|rgba\(*) out+=("$k=$v") ;;
     *)
       case "$v" in *"("*) continue ;; esac
       case "$v" in *[!A-Za-z]*) continue ;; esac
-      printf '%s=%s\n' "$k" "$v" ;;
+      out+=("$k=$v") ;;
   esac
 done
+
+[ "${#out[@]}" -eq 0 ] || printf '%s\n' "${out[@]}"
 
 if [ -n "${2:-}" ]; then printf '#CSSGEN %s\n' "$2"; fi
 

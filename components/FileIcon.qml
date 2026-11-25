@@ -8,6 +8,16 @@ Item {
     property var iconNames: []
     property string source: ""
 
+    function stripQuery(name) {
+        const q = name.indexOf("?");
+        if (q <= 0)
+            return name;
+        const query = name.substring(q + 1);
+        if (!/^[A-Za-z_][A-Za-z0-9_]*(=[^&]*)?(&[A-Za-z_][A-Za-z0-9_]*(=[^&]*)?)*$/.test(query))
+            return name;
+        return name.substring(0, q);
+    }
+
     function cleanNames() {
         const clean = [];
         for (let name of fileIcon.iconNames || []) {
@@ -16,6 +26,10 @@ Item {
             const marker = "image://icon/";
             if (name.indexOf(marker) === 0)
                 name = name.substring(marker.length);
+            if (!name)
+                continue;
+
+            name = fileIcon.stripQuery(name);
             if (!name)
                 continue;
 
@@ -30,9 +44,6 @@ Item {
                 return null;
             }
 
-            const q = name.indexOf("?");
-            if (q >= 0)
-                name = name.substring(0, q);
             if (!name)
                 continue;
             if (clean.indexOf(name) < 0)

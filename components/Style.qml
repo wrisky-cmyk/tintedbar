@@ -553,7 +553,7 @@ Item {
 
     readonly property string terminal: Quickshell.env("TERMINAL") || "alacritty"
 
-    readonly property string version: "26.11.22"
+    readonly property string version: "26.11.25"
     readonly property string minQuickshellVersion: "0.3.2"
     property string runningQuickshellVersion: ""
     property bool quickshellVersionChecked: false
@@ -680,10 +680,60 @@ Item {
             if (app && app.startupClass && String(app.startupClass).toLowerCase() === lc && app.icon)
                 return app;
         }
+
+        const byExec = root.lookupByExecBasename(lc);
+        if (byExec)
+            return byExec;
         const h = DesktopEntries.heuristicLookup(c);
         if (h && h.icon)
             return h;
         return null;
+    }
+
+    function lookupByExecBasename(lc) {
+        for (const app of root.modelValues(DesktopEntries.applications)) {
+            if (!app || !app.icon || !app.execString)
+                continue;
+            const base = root.execBasename(app.execString);
+            if (base && base.toLowerCase() === lc)
+                return app;
+        }
+        return null;
+    }
+
+    function execBasename(execString) {
+        let s = String(execString || "").trim();
+        if (s === "")
+            return "";
+
+        s = s.replace(/\\/g, "").replace(/"/g, "");
+        let parts = s.split(/\s+/);
+
+        let i = 0;
+        while (i < parts.length) {
+            const p = parts[i];
+            if (p === "env" || p === "nohup" || p === "setsid") {
+                i++;
+                continue;
+            }
+            if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(p)) {
+                i++;
+                continue;
+            }
+            break;
+        }
+        if (i >= parts.length)
+            return "";
+        let first = parts[i];
+
+        if ((first === "sh" || first === "bash") && parts[i + 1] === "-c" && parts[i + 2])
+            first = parts[i + 2];
+
+        first = first.replace(/^.*\//, "");
+        first = first.replace(/\.exe$/i, "");
+
+        first = first.replace(/%[A-Za-z]/g, "");
+        return first;
     }
 
     Component.onCompleted: {
@@ -717,11 +767,44 @@ Item {
             if (lic !== ic && out.indexOf(lic) < 0)
                 out.push(lic);
         }
+
+        const alias = root.classAliases[lc];
+        if (alias)
+            for (const n of alias)
+                if (out.indexOf(n) < 0)
+                    out.push(n);
         return out;
     }
 
-    readonly property var titleIconRules: [[/^btop/i, "btop"], [/^htop/i, "htop"], [/^yazi/i, "yazi"], [/^cmus/i, "cmus"], [/^ranger/i, "ranger"], [/^nvim/i, "nvim"], [/helix/i, "helix"], [/^micro/i, "micro"]]
-    function titleIcon(title) {
+    readonly property var classAliases: ({
+            "com.tencent.wechatappex": ["wechat", "com.tencent.wechat"],
+            "com.xunlei.download": ["xunlei"],
+            "tdxcfv": ["com.tdx.tdxcfv"]
+        })
+
+    readonly property var titleIconRules: [[/^btop/i, "btop"], [/^htop/i, "htop"], [/^yazi/i, "yazi"], [/^nvim/i, "nvim"], [/^cmus/i, "cmus"], [/^ranger/i, "ranger"], [/^helix/i, "helix"], [/^micro/i, "micro"]]
+
+    readonly property var terminalAppIds: ["alacritty", "ghostty", "com.mitchellh.ghostty", "kitty", "foot", "wezterm", "org.wezfurlong.wezterm", "konsole", "org.kde.konsole", "xterm", "urxvt", "rxvt-unicode", "st", "st-256color", "termite", "tilix", "xfce4-terminal", "gnome-terminal", "org.gnome.terminal", "kgx", "org.gnome.console", "terminator", "sakura", "qterminal", "lxterminal", "mate-terminal", "ptyxis", "org.gnome.ptyxis"]
+
+    function isTerminalApp(appClass) {
+        const c = String(appClass || "").toLowerCase();
+        if (c === "")
+            return false;
+
+        for (const t of root.terminalAppIds)
+            if (c === t)
+                return true;
+
+        const tail = c.indexOf(".") >= 0 ? c.slice(c.lastIndexOf(".") + 1) : c;
+        for (const t of root.terminalAppIds)
+            if (tail === t)
+                return true;
+        return false;
+    }
+
+    function titleIcon(title, appClass) {
+        if (!root.isTerminalApp(appClass))
+            return "";
         const t = String(title || "");
         for (const r of root.titleIconRules)
             if (r[0].test(t))
@@ -738,7 +821,7 @@ Item {
     }
 
     function readJsonCmd(path, fallback) {
-        return "[ -s " + sq(path) + " ] && cat " + sq(path) + " || printf '%s' " + sq(fallback);
+        return "if [ -s " + sq(path) + " ]; then cat " + sq(path) + " || exit 3; " + "else printf '%s' " + sq(fallback) + "; fi";
     }
 
     function launchDesktop(id) {
@@ -748,43 +831,7 @@ Item {
         Quickshell.execDetached(["bash", "-c", "exec " + root.sq(root.configDir + "/scripts/launch-desktop.sh") + " " + root.sq(s)]);
     }
 
-    function glyphFor(cls, title) {
-        const c = String(cls || "").toLowerCase();
-        const t = String(title || "").toLowerCase();
-        const byTitle = [[/btop/, "\u{F04C5}"], [/yazi/, "\u{F0645}"], [/ranger/, "\uEAF7"], [/cmus/, "\u{F0387}"]];
-        for (const pair of byTitle)
-            if (pair[0].test(t))
-                return pair[1];
-        const byClass = {
-            "cc-switch": "\u{F04E6}",
-            "firefox": "\uF269",
-            "chrome": "\u{F02AF}",
-            "chromium": "\u{F02AF}",
-            "alacritty": "\uF489",
-            "com.mitchellh.ghostty": "\uF120",
-            "foot": "\uF120",
-            "org.wezfurlong.wezterm": "\uF120",
-            "code": "\u{F0A1E}",
-            "codium": "\u{F0A1E}",
-            "com.xunlei.download": "\uF019",
-            "tdxcfv": "\uF201",
-            "org.telegram.desktop": "\uF2C6",
-            "wechat": "\uF1D7",
-            "thunar": "\uEA83",
-            "qq": "\uF1D6",
-            "micro": "\uF044",
-            "mpv": "\uF36E",
-            "fcitx": "\uF11C",
-            "baidunetdisk": "\uEAC2",
-            "binance": "\uF10F",
-            "localsend": "\u{F10DD}",
-            "scrcpy": "\u{F04F7}",
-            "blueman-manager": "\uF293",
-            "org.pulseaudio.pavucontrol": "\u{F071F}"
-        };
-        for (const key in byClass)
-            if (c.indexOf(key) >= 0)
-                return byClass[key];
+    function glyphFor() {
         return "\uF059";
     }
 
@@ -888,15 +935,19 @@ Item {
         Style.notifySimple(I18n.t("hint.appMissing"), name);
     }
 
-    function notifySimple(title, body) {
+    function notifySimple(title, body, timeoutMs) {
+        const ms = (timeoutMs === undefined || timeoutMs === null) ? 4000 : Math.max(0, Math.round(Number(timeoutMs) || 0));
+
         if (notifyProc.running) {
             root.notifyPending = {
                 title: title,
-                body: body
+                body: body,
+                timeoutMs: ms
             };
             return;
         }
-        notifyProc.command = ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", title, body, "[]", "{\"urgency\": <byte 1>}", 4000];
+
+        notifyProc.command = ["gdbus", "call", "--timeout", "3", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", title, body, "[]", "{\"urgency\": <byte 1>}", ms];
         notifyProc.running = true;
     }
 
@@ -911,7 +962,7 @@ Item {
             const q = root.notifyPending;
             root.notifyPending = null;
             if (q)
-                root.notifySimple(q.title, q.body);
+                root.notifySimple(q.title, q.body, q.timeoutMs);
         }
     }
 

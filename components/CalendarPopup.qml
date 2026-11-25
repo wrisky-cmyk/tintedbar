@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import Quickshell
 
 PopupPanel {
     id: calendarPopup
@@ -169,7 +168,6 @@ PopupPanel {
                 spacing: 0
 
                 Repeater {
-
                     model: I18n.weekdayHeaders
                     delegate: Text {
 

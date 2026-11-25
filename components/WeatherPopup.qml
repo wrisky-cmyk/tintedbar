@@ -89,8 +89,9 @@ PopupPanel {
     function enterLocationEdit() {
         geoGen++;
         geoPendingQuery = "";
+
         if (geoProc.running)
-            geoProc.kill();
+            geoProc.running = false;
         locationEdit = true;
         searchState = "idle";
         searchResults = [];
@@ -104,7 +105,7 @@ PopupPanel {
         geoGen++;
         geoPendingQuery = "";
         if (geoProc.running)
-            geoProc.kill();
+            geoProc.running = false;
         locationEdit = false;
         searchState = "idle";
         searchResults = [];
@@ -129,13 +130,35 @@ PopupPanel {
         writeLocationConf(String(r.lat), String(r.lon), r.name);
     }
 
+    property var pendingLocWrite: null
     function writeLocationConf(lat, lon, city) {
+        if (locationWrite.running) {
+            pendingLocWrite = [lat, lon, city];
+            return;
+        }
+
         const oneLine = String(city || "").replace(/[\r\n]+/g, " ").trim();
         locationWrite.pendingContent = "lat=" + lat + "\nlon=" + lon + "\n" + (oneLine !== "" ? "city=" + oneLine + "\n" : "");
         locationWrite.command = ["bash", Style.configDir + "/scripts/atomic-write.sh", weather.confPath];
         locationWrite.stdinEnabled = true;
         locationWrite.running = true;
     }
+
+    function flushPendingOnDestroy() {
+        let content = "";
+        if (pendingLocWrite !== null) {
+            const q = pendingLocWrite;
+            pendingLocWrite = null;
+            const oneLine = String(q[2] || "").replace(/[\r\n]+/g, " ").trim();
+            content = "lat=" + q[0] + "\nlon=" + q[1] + "\n" + (oneLine !== "" ? "city=" + oneLine + "\n" : "");
+        } else if (locationWrite.running && locationWrite.pendingContent !== "") {
+            content = locationWrite.pendingContent;
+        }
+        if (content === "")
+            return;
+        Quickshell.execDetached(["sh", "-c", "printf %s " + Style.sq(content) + " | bash " + Style.sq(Style.configDir + "/scripts/atomic-write.sh") + " " + Style.sq(weather.confPath)]);
+    }
+    Component.onDestruction: flushPendingOnDestroy()
 
     function manualSubmit(text) {
         const parts = String(text).split(/[,，]/).map(x => x.trim());
@@ -235,10 +258,18 @@ PopupPanel {
             locationWrite.stdinEnabled = false;
         }
         onExited: code => {
-            if (code === 0)
-                weatherPopup.exitLocationEdit();
-            else
+            const q = weatherPopup.pendingLocWrite;
+            if (q !== null) {
+                weatherPopup.pendingLocWrite = null;
+                Qt.callLater(() => weatherPopup.writeLocationConf(q[0], q[1], q[2]));
+            }
+
+            if (code === 0) {
+                if (q === null)
+                    weatherPopup.exitLocationEdit();
+            } else if (q === null) {
                 Style.notifySimple(I18n.t("wx.writeFailed"), "");
+            }
         }
     }
 

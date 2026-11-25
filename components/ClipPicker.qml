@@ -209,7 +209,7 @@ OverlayPanel {
 
         onExited: code => {
             if (code !== 0)
-                Style.notifySimple(I18n.t("clips.copyFailed"), "");
+                Style.notifySimple(I18n.t("clips.copyFailed"), I18n.t("clips.copyFailedBody"));
         }
     }
 
@@ -405,7 +405,6 @@ OverlayPanel {
 
             Item {
                 width: parent.width
-
                 height: parent.height - 44
 
                 ListView {

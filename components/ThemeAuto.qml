@@ -30,6 +30,38 @@ Item {
             poll.stop();
     }
 
+    Connections {
+        target: themeAuto.qsRoot ? themeAuto.qsRoot : null
+        function onAutoThemeChanged() {
+            if (!themeAuto.qsRoot.barSettingsLoaded)
+                return;
+            if (themeAuto.qsRoot.autoTheme && !themeAuto.weather.located)
+                themeAuto.warnNoLocation();
+        }
+    }
+
+    function warnNoLocation() {
+        if (notifyProc.running)
+            return;
+        notifyProc.running = true;
+    }
+
+    Process {
+        id: notifyProc
+        running: false
+        command: ["gdbus", "call", "--timeout", "3", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "quickshell", "0", "", I18n.t("autoTheme.noLocation"), I18n.t("autoTheme.noLocationBody"), "[]", "{\"urgency\": <byte 1>}", "8000"]
+        stderr: StdioCollector {
+            onStreamFinished: {
+                if (text.trim() !== "")
+                    console.log("[AUTOTHEME] notify stderr: " + text.trim());
+            }
+        }
+        onExited: code => {
+            if (code !== 0)
+                console.log("[AUTOTHEME] notify failed, gdbus exit " + code);
+        }
+    }
+
     function checkTarget() {
         if (!themeAuto.active)
             return;
